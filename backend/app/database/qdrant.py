@@ -4,7 +4,7 @@ from qdrant_client.http.models import Distance, VectorParams
 from app.utils.logger import log_info, log_error
 
 # Load environment configuration
-QDRANT_HOST = os.getenv("QDRANT_HOST", "localhost")
+QDRANT_HOST = os.getenv("QDRANT_HOST", "")
 QDRANT_PORT = int(os.getenv("QDRANT_PORT", "6333"))
 QDRANT_API_KEY = os.getenv("QDRANT_API_KEY", "")
 
@@ -12,25 +12,25 @@ qdrant_client = None
 is_qdrant_mock = False
 
 try:
-    if QDRANT_HOST and QDRANT_HOST.lower() != "none":
+    if QDRANT_HOST and QDRANT_HOST.lower() not in ("none", "localhost", "127.0.0.1", ""):
         if QDRANT_HOST.startswith("http://") or QDRANT_HOST.startswith("https://"):
             qdrant_client = QdrantClient(
                 url=QDRANT_HOST,
                 api_key=QDRANT_API_KEY if QDRANT_API_KEY else None,
-                timeout=5.0
+                timeout=3.0
             )
         else:
             qdrant_client = QdrantClient(
                 host=QDRANT_HOST,
                 port=QDRANT_PORT,
                 api_key=QDRANT_API_KEY if QDRANT_API_KEY else None,
-                timeout=5.0
+                timeout=3.0
             )
         # Test connection by listing collections
         qdrant_client.get_collections()
         log_info(f"Successfully connected to Qdrant vector database at {QDRANT_HOST}")
     else:
-        raise ValueError("QDRANT_HOST is not configured.")
+        raise ValueError("QDRANT_HOST is not configured with a remote cluster.")
 except Exception as e:
     log_error("Failed to connect to external Qdrant server, falling back to local in-memory vector DB", exc=e)
     # Zero-config in-memory database

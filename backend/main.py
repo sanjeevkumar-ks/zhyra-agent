@@ -81,10 +81,12 @@ app.include_router(memory.router, prefix="/api/memory", tags=["AI Memory"])
 app.include_router(team.router, prefix="/api/team", tags=["Team"])
 app.include_router(context.router, prefix="/api/context", tags=["Context Optimization"])
 
+@app.get("/", tags=["Health"])
+@app.get("/health", tags=["Health"])
 @app.get("/api/health", tags=["Health"])
 async def health_check():
     return {
-        "status": "healthy",
+        "status": "ok",
         "timestamp": time.time(),
         "bypass_auth": os.getenv("FIREBASE_BYPASS_AUTH") == "true",
         "version": "1.0.0"

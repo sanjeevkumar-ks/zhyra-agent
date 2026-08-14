@@ -50,7 +50,9 @@ class MockCollectionReference:
         return MockDocumentReference(self.name, doc_id, self.client)
 
 class MockFirestoreClient:
-    def __init__(self, file_path: str = "mock_db.json"):
+    def __init__(self, file_path: str = None):
+        if file_path is None:
+            file_path = os.getenv("MOCK_DB_PATH", "mock_db.json")
         self.file_path = file_path
         self._db = {}
         self._load()
@@ -70,6 +72,15 @@ class MockFirestoreClient:
         try:
             with open(self.file_path, "w") as f:
                 json.dump(self._db, f, indent=2)
+        except OSError:
+            # Fallback to /tmp if working directory is read-only (e.g. Vercel)
+            try:
+                tmp_path = os.path.join("/tmp", os.path.basename(self.file_path))
+                with open(tmp_path, "w") as f:
+                    json.dump(self._db, f, indent=2)
+                self.file_path = tmp_path
+            except Exception as e:
+                log_error("Failed to save mock firestore database file in /tmp", exc=e)
         except Exception as e:
             log_error("Failed to save mock firestore database file", exc=e)
 
@@ -102,15 +113,39 @@ firestore_client = None
 is_mock = True
 
 firebase_creds_path = os.getenv("FIREBASE_CREDENTIALS_JSON_PATH")
+firebase_creds_json = os.getenv("FIREBASE_CREDENTIALS_JSON")
+firebase_private_key = os.getenv("FIREBASE_PRIVATE_KEY")
+firebase_client_email = os.getenv("FIREBASE_CLIENT_EMAIL")
+firebase_project_id = os.getenv("FIREBASE_PROJECT_ID", "zhyra-e0d80")
 
+cred_dict = None
 if firebase_creds_path and os.path.exists(firebase_creds_path):
+    try:
+        with open(firebase_creds_path, "r") as f:
+            cred_dict = json.load(f)
+    except Exception as e:
+        log_error("Failed to read FIREBASE_CREDENTIALS_JSON_PATH", exc=e)
+elif firebase_creds_json:
+    try:
+        cred_dict = json.loads(firebase_creds_json)
+    except Exception as e:
+        log_error("Failed to parse FIREBASE_CREDENTIALS_JSON env var", exc=e)
+elif firebase_private_key and firebase_client_email:
+    cleaned_key = firebase_private_key.replace("\\n", "\n")
+    cred_dict = {
+        "type": "service_account",
+        "project_id": firebase_project_id,
+        "private_key": cleaned_key,
+        "client_email": firebase_client_email,
+    }
+
+if cred_dict:
     try:
         import firebase_admin
         from firebase_admin import credentials, firestore
         
-        # Initialize Firebase App if not already initialized
         if not firebase_admin._apps:
-            cred = credentials.Certificate(firebase_creds_path)
+            cred = credentials.Certificate(cred_dict)
             firebase_admin.initialize_app(cred)
         
         firestore_client = firestore.client()
@@ -120,9 +155,8 @@ if firebase_creds_path and os.path.exists(firebase_creds_path):
         log_error("Failed to initialize Firebase Admin SDK with credentials. Falling back to mock Firestore.", exc=e)
 
 if firestore_client is None:
-    # Use mock db
     firestore_client = MockFirestoreClient()
-    log_info("Mock Firestore database loaded (fallback mode). Working file: mock_db.json")
+    log_info("Mock Firestore database loaded (fallback mode).")
 
 def get_db():
     """Dependency injection helper for database operations."""

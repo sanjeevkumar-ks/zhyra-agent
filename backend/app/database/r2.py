@@ -14,8 +14,17 @@ LOCAL_STORAGE_DIR = "local_r2_storage"
 class LocalFileStorageClient:
     def __init__(self, storage_dir: str = LOCAL_STORAGE_DIR):
         self.storage_dir = storage_dir
-        os.makedirs(storage_dir, exist_ok=True)
-        log_info(f"Initialized Local Storage Client. Assets will be saved in: {os.path.abspath(storage_dir)}")
+        try:
+            os.makedirs(self.storage_dir, exist_ok=True)
+            log_info(f"Initialized Local Storage Client. Assets will be saved in: {os.path.abspath(self.storage_dir)}")
+        except OSError:
+            # Serverless / read-only filesystem environment (e.g. Vercel)
+            self.storage_dir = os.path.join("/tmp", "local_r2_storage")
+            try:
+                os.makedirs(self.storage_dir, exist_ok=True)
+                log_info(f"Initialized Fallback Local Storage Client in /tmp: {os.path.abspath(self.storage_dir)}")
+            except Exception as e:
+                log_error("Could not create local storage directory even in /tmp", exc=e)
 
     def upload_file(self, file_content: bytes, file_name: str, content_type: str = None) -> str:
         # Avoid directories injection

@@ -23,3 +23,6 @@ slack-sdk>=3.27.0
 razorpay>=1.4.0
 googlemaps>=4.10.0
 elevenlabs>=1.2.0
+pypdf>=4.0.0
+python-dateutil>=2.8.2
+
