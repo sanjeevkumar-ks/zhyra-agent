@@ -1,5 +1,12 @@
 {
   "projects": {
     "default": "zhyra-e0d80"
+  },
+  "targets": {
+    "zhyra-e0d80": {
+      "hosting": {
+        "zhyra": ["zhyra"]
+      }
+    }
   }
 }

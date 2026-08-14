@@ -1,5 +1,6 @@
 {
   "hosting": {
+    "target": "zhyra",
     "public": "dist",
     "ignore": [
       "firebase.json",
