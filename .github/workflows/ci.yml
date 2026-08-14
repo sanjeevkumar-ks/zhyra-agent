@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  frontend:
+    name: Frontend Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build frontend (production)
+        env:
+          VITE_API_URL: /api
+        run: npm run build
+
+      - name: Verify dist output
+        run: |
+          ls -la dist/
+          test -f dist/index.html && echo "✅ dist/index.html exists"
+
+  backend:
+    name: Backend Checks
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Python syntax check
+        run: python -m py_compile main.py && echo "✅ main.py syntax OK"
+
+      - name: Check all Python files compile
+        run: |
+          find . -name "*.py" -not -path "./.venv/*" -not -path "./__pycache__/*" | while read f; do
+            python -m py_compile "$f" && echo "✅ $f" || exit 1
+          done
+
+      - name: Verify health endpoint exists
+        run: |
+          grep -q "api/health" main.py && echo "✅ /api/health endpoint found"

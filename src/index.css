@@ -1,0 +1,94 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Plus Jakarta Sans", "Inter", ui-sans-serif, system-ui, sans-serif;
+
+  --color-canvas: #FBFAF8;
+  --color-canvas-alt: #F5F3EF;
+  --color-surface: #FFFFFF;
+  --color-ink: #14140F;
+  --color-ink-soft: #4A4A45;
+  --color-ink-faint: #8B8B84;
+  --color-line: #E9E7E1;
+  --color-line-soft: #F0EEE8;
+
+  --color-accent: #2F6BFF;
+  --color-accent-soft: #EAF0FF;
+  --color-violet: #8B7CF6;
+  --color-violet-soft: #F1EEFE;
+  --color-emerald: #16A672;
+  --color-emerald-soft: #E9F7F1;
+  --color-amber: #D89A2A;
+  --color-amber-soft: #FBF3E3;
+  --color-rose: #E15B5B;
+  --color-rose-soft: #FCEDED;
+
+  --shadow-soft: 0 1px 2px rgba(20, 20, 15, 0.04), 0 8px 24px -12px rgba(20, 20, 15, 0.10);
+  --shadow-soft-lg: 0 4px 12px rgba(20, 20, 15, 0.04), 0 24px 48px -20px rgba(20, 20, 15, 0.16);
+
+  --radius-panel: 16px;
+}
+
+@layer base {
+  * {
+    border-color: var(--color-line);
+  }
+  html {
+    background: var(--color-canvas);
+  }
+  body {
+    @apply antialiased;
+    background: var(--color-canvas);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-feature-settings: "ss01", "ss02";
+  }
+  ::selection {
+    background: var(--color-accent-soft);
+    color: var(--color-accent);
+  }
+}
+
+@layer utilities {
+  .scrollbar-none::-webkit-scrollbar { display: none; }
+  .scrollbar-none { scrollbar-width: none; -ms-overflow-style: none; }
+
+  .scrollbar-thin::-webkit-scrollbar { width: 6px; height: 6px; }
+  .scrollbar-thin::-webkit-scrollbar-thumb { background: var(--color-line); border-radius: 999px; }
+  .scrollbar-thin::-webkit-scrollbar-track { background: transparent; }
+
+  .glass {
+    background: color-mix(in srgb, white 72%, transparent);
+    backdrop-filter: blur(20px) saturate(160%);
+    -webkit-backdrop-filter: blur(20px) saturate(160%);
+  }
+
+  .text-balance { text-wrap: balance; }
+}
+
+@keyframes shimmer {
+  0% { background-position: -400px 0; }
+  100% { background-position: 400px 0; }
+}
+.skeleton {
+  background: linear-gradient(90deg, #F0EEE8 25%, #F7F6F2 37%, #F0EEE8 63%);
+  background-size: 800px 100%;
+  animation: shimmer 1.6s ease-in-out infinite;
+}
+
+@keyframes pulse-soft {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+.animate-pulse-soft { animation: pulse-soft 2s ease-in-out infinite; }
+
+@keyframes float-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-float-in { animation: float-in 0.5s cubic-bezier(0.16, 1, 0.3, 1) both; }
+
+@keyframes dash {
+  to { stroke-dashoffset: -24; }
+}
+.animate-dash { stroke-dasharray: 4 6; animation: dash 1s linear infinite; }

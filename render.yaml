@@ -1,0 +1,80 @@
+services:
+  - type: web
+    name: zhyra-api
+    runtime: python
+    region: oregon  # Free tier region (US West)
+    plan: free
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health
+    envVars:
+      - key: PORT
+        value: 10000
+      - key: HOST
+        value: 0.0.0.0
+      - key: DEBUG
+        value: false
+      - key: FIREBASE_BYPASS_AUTH
+        value: false
+      # Production URLs — update after Render deployment
+      - key: FRONTEND_BASE_URL
+        value: https://zhyra.web.app
+      - key: BACKEND_BASE_URL
+        value: https://zhyra-api.onrender.com
+      - key: GOOGLE_REDIRECT_URI
+        value: https://zhyra-api.onrender.com/api/integrations/oauth/callback/google
+      - key: SLACK_REDIRECT_URI
+        value: https://zhyra-api.onrender.com/api/integrations/oauth/callback/slack
+      - key: SHOPIFY_REDIRECT_URI
+        value: https://zhyra-api.onrender.com/api/integrations/oauth/callback/shopify
+      - key: HUBSPOT_REDIRECT_URI
+        value: https://zhyra-api.onrender.com/api/integrations/oauth/callback/hubspot
+      - key: WHATSAPP_API_VERSION
+        value: v19.0
+      - key: FIREBASE_PROJECT_ID
+        value: zhyra-e0d80
+      # Secrets — configure these in Render Dashboard (Environment tab)
+      # Never commit actual values
+      - key: ENCRYPTION_KEY
+        sync: false
+      - key: FIREBASE_CREDENTIALS_JSON_PATH
+        sync: false
+      - key: QDRANT_HOST
+        sync: false
+      - key: QDRANT_PORT
+        sync: false
+      - key: QDRANT_API_KEY
+        sync: false
+      - key: R2_ENDPOINT_URL
+        sync: false
+      - key: R2_ACCESS_KEY_ID
+        sync: false
+      - key: R2_SECRET_ACCESS_KEY
+        sync: false
+      - key: R2_BUCKET_NAME
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: CLAUDE_API_KEY
+        sync: false
+      - key: OPENROUTER_API_KEY
+        sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: SLACK_CLIENT_ID
+        sync: false
+      - key: SLACK_CLIENT_SECRET
+        sync: false
+      - key: SHOPIFY_CLIENT_ID
+        sync: false
+      - key: SHOPIFY_CLIENT_SECRET
+        sync: false
+      - key: HUBSPOT_CLIENT_ID
+        sync: false
+      - key: HUBSPOT_CLIENT_SECRET
+        sync: false

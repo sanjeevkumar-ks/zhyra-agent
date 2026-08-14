@@ -1,0 +1,40 @@
+# Python virtual environment
+.venv/
+venv/
+env/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+
+# Environment files (secrets)
+.env
+.env.local
+.env.production
+.env.development
+.env.*.local
+
+# Firebase credentials (NEVER in Docker image — use Secret Manager)
+*firebase-adminsdk*.json
+*service-account*.json
+
+# Local storage (not for production)
+local_r2_storage/
+mock_db.json
+
+# Test files
+tests/
+test_*.py
+*.test.py
+
+# Dev files
+docker-compose.yml
+
+# macOS
+.DS_Store
+
+# Logs
+*.log

@@ -1,0 +1,80 @@
+# ─── Secrets & Credentials ───────────────────────────────────────────────────
+# NEVER commit these files
+backend/.env
+backend/.env.local
+backend/.env.production
+backend/.env.development
+backend/.env.*.local
+.env
+.env.local
+.env.production
+.env.development
+.env.*.local
+
+# Firebase service account JSON files (contain private keys)
+*firebase-adminsdk*.json
+*service-account*.json
+*serviceAccount*.json
+
+# ─── Frontend ────────────────────────────────────────────────────────────────
+node_modules/
+dist/
+.vite/
+*.local
+
+# ─── Backend ─────────────────────────────────────────────────────────────────
+backend/.venv/
+backend/__pycache__/
+backend/**/__pycache__/
+backend/**/*.pyc
+backend/**/*.pyo
+backend/**/*.pyd
+backend/.pytest_cache/
+backend/tests/__pycache__/
+
+# Local storage / mock data (not for production)
+backend/local_r2_storage/
+backend/mock_db.json
+
+# Test artifacts
+backend/test_knowledge_upload.txt
+
+# ─── Python ──────────────────────────────────────────────────────────────────
+*.pyc
+*.pyo
+*.pyd
+__pycache__/
+*.egg-info/
+.eggs/
+.venv/
+venv/
+env/
+.Python
+pip-log.txt
+pip-delete-this-directory.txt
+
+# ─── macOS ───────────────────────────────────────────────────────────────────
+.DS_Store
+.AppleDouble
+.LSOverride
+Thumbs.db
+
+# ─── IDE / Editor ────────────────────────────────────────────────────────────
+.vscode/settings.json
+.vscode/launch.json
+.idea/
+*.swp
+*.swo
+*~
+
+# ─── Logs ────────────────────────────────────────────────────────────────────
+*.log
+firebase-debug.log
+firebase-debug.*.log
+.firebase/
+
+# ─── Docker ──────────────────────────────────────────────────────────────────
+# docker-compose.yml is kept for local dev reference (no secrets)
+
+# ─── Design Docs (not for production repo) ───────────────────────────────────
+Comixo-Flash-Design-System.md
