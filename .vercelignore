@@ -1,0 +1,17 @@
+# Vercel Ignore Rules for Python Serverless Function
+
+node_modules/
+dist/
+src/
+.git/
+.github/
+backend/.venv*/
+*.md
+package-lock.json
+package.json
+firebase-debug.log
+firebase.ts
+index.html
+Comixo-Flash-Design-System.md
+render.yaml
+zhyra-e0d80-firebase-adminsdk-fbsvc-08b7ae03d4.json
