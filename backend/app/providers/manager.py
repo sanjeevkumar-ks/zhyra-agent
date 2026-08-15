@@ -142,7 +142,8 @@ class ProviderManager:
         workspace_id: str,
         prompt: str,
         system_prompt: str = None,
-        agent_override: Dict[str, Any] = None
+        agent_override: Dict[str, Any] = None,
+        functions: List[Dict[str, Any]] = None
     ) -> str:
         """
         Routes the text generation to the active provider, handling any agent-level overrides.
@@ -206,7 +207,8 @@ class ProviderManager:
                     system_prompt=system_prompt,
                     model=model,
                     temperature=temperature,
-                    max_tokens=max_tokens
+                    max_tokens=max_tokens,
+                    functions=functions
                 )
                 duration = time.time() - start_time
                 # Estimate token usage (roughly 1 token = 4 chars)

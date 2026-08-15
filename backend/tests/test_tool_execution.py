@@ -35,6 +35,21 @@ class TestToolExecutionLayer(unittest.TestCase):
         self.assertIn("GoogleCalendar.update_event", desc)
         self.assertIn("GoogleCalendar.delete_event", desc)
 
+    def test_dynamic_registry_tool_schemas(self):
+        schemas = DynamicToolRegistry.get_tool_schemas(["int_gcal"])
+        names = [s["name"] for s in schemas]
+        self.assertIn("calendar_create_event", names)
+        self.assertIn("calendar_list_events", names)
+
+    def test_parse_calendar_tool_call(self):
+        from app.services.conversation_service import ConversationService
+        raw_text = 'TOOL_CALL:{"tool": "calendar_create_event", "args": {"summary": "Investor Meeting", "start_time": "2026-08-16T15:00:00Z"}}'
+        parsed = ConversationService._parse_tool_call(raw_text)
+        self.assertIsNotNone(parsed)
+        self.assertEqual(parsed["tool"], "GoogleCalendar")
+        self.assertEqual(parsed["method"], "create_event")
+        self.assertEqual(parsed["args"]["summary"], "Investor Meeting")
+
     def test_response_formatter_calendar_block(self):
         tool_result = {
             "success": True,

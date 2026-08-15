@@ -45,7 +45,7 @@ async def retrieve_context_node(state: AgentState) -> Dict[str, Any]:
     
     # Compile dynamic tool instructions only for connected, permitted, and ready tools
     agent_tools = state["agent_data"].get("tools") or []
-    tools_instructions, _ = await DynamicToolRegistry.get_available_tools_prompt(
+    tools_instructions, ready_tools = await DynamicToolRegistry.get_available_tools_prompt(
         workspace_id=state["workspace_id"],
         agent_id=state["agent_id"],
         agent_tools=agent_tools
@@ -63,21 +63,26 @@ async def retrieve_context_node(state: AgentState) -> Dict[str, Any]:
     if tools_instructions:
         packet.tool_prompt = tools_instructions + (packet.tool_prompt or "")
 
+    packet_dict = packet.model_dump()
+    packet_dict["ready_tools"] = ready_tools
+
     return {
         "context": packet.rag_context,
         "cited_sources": packet.cited_sources,
-        "context_packet": packet.model_dump()
+        "context_packet": packet_dict
     }
 
 async def generate_response_node(state: AgentState) -> Dict[str, Any]:
     """Generates next response turn using ProviderManager and tracks token usage."""
     packet_data = state.get("context_packet")
+    ready_tools = []
     if packet_data:
         from app.ai.context.models import ContextPacket
         packet = ContextPacket(**packet_data)
         system_prompt = packet.system_prompt
         if packet.tool_prompt:
             system_prompt += packet.tool_prompt
+        ready_tools = packet_data.get("ready_tools", [])
         
         prompt = f"Conversational History:\n{packet.conversation_history}\n"
         if packet.memory_context:
@@ -118,11 +123,15 @@ async def generate_response_node(state: AgentState) -> Dict[str, Any]:
     import time
     start_time = time.time()
 
+    from app.ai.integration.dynamic_registry import DynamicToolRegistry
+    functions_schema = DynamicToolRegistry.get_tool_schemas(ready_tools) if ready_tools else None
+
     ai_text = await ProviderManager.generate_response(
         workspace_id=state["workspace_id"],
         prompt=prompt,
         system_prompt=system_prompt,
-        agent_override=agent_override
+        agent_override=agent_override,
+        functions=functions_schema
     )
 
     duration_ms = int((time.time() - start_time) * 1000)
@@ -188,18 +197,45 @@ async def execute_tool_node(state: AgentState) -> Dict[str, Any]:
     if not tool_call:
         return {}
         
-    tool_name = tool_call.get("tool")
-    method_name = tool_call.get("method")
+    tool_name = tool_call.get("tool", "")
+    method_name = tool_call.get("method", "")
     args = tool_call.get("args", {})
     
+    # Handle function_name patterns like calendar_create_event or GoogleCalendar.create_event
+    if "." in tool_name:
+        parts = tool_name.split(".", 1)
+        tool_name = parts[0]
+        method_name = parts[1]
+    elif "_" in tool_name and not method_name:
+        if tool_name.startswith("calendar_"):
+            method_name = tool_name.replace("calendar_", "")
+            tool_name = "GoogleCalendar"
+        elif tool_name.startswith("gmail_"):
+            method_name = tool_name.replace("gmail_", "")
+            tool_name = "Gmail"
+        elif tool_name.startswith("gdrive_"):
+            method_name = tool_name.replace("gdrive_", "")
+            tool_name = "GoogleDrive"
+        elif tool_name.startswith("slack_"):
+            method_name = tool_name.replace("slack_", "")
+            tool_name = "Slack"
+        elif tool_name.startswith("hubspot_"):
+            method_name = tool_name.replace("hubspot_", "")
+            tool_name = "HubSpot"
+        elif tool_name.startswith("shopify_"):
+            method_name = tool_name.replace("shopify_", "")
+            tool_name = "Shopify"
+
+    log_info(f"[Tool Execution Started] workspace_id={state['workspace_id']} agent_id={state['agent_id']} selected_tool_name={tool_name} method_name={method_name} tool_arguments={args}")
+
     # 1. Map tool name to integration ID
     integration_id = tool_name
     tool_name_lower = tool_name.lower()
     tool_to_id = {
-        "googlecalendar": "int_gcal", "calendar": "int_gcal", "gcal": "int_gcal",
+        "googlecalendar": "int_gcal", "calendar": "int_gcal", "gcal": "int_gcal", "event": "int_gcal",
         "gmail": "int_gmail", "email": "int_gmail",
         "whatsapp": "int_whatsapp",
-        "googledrive": "int_gdrive", "drive": "int_gdrive",
+        "googledrive": "int_gdrive", "drive": "int_gdrive", "file": "int_gdrive",
         "hubspot": "int_hubspot", "crm": "int_hubspot",
         "razorpay": "int_razorpay",
         "shopify": "int_shopify", "store": "int_shopify",
@@ -211,7 +247,7 @@ async def execute_tool_node(state: AgentState) -> Dict[str, Any]:
         "customapi": "int_rest_api", "restapi": "int_rest_api"
     }
     for key, val in tool_to_id.items():
-        if key in tool_name_lower:
+        if key in tool_name_lower or key in method_name.lower():
             integration_id = val
             break
 
@@ -222,7 +258,7 @@ async def execute_tool_node(state: AgentState) -> Dict[str, Any]:
     preflight = await IntegrationPreflight.check(state["workspace_id"], state["agent_id"], integration_id)
     
     if preflight.status != "READY":
-        log_info(f"Preflight blocked tool {tool_name}. Status: {preflight.status}")
+        log_info(f"[Tool Execution Preflight Blocked] integration_name={integration_id} integration_status={preflight.status} message={preflight.message}")
         normalized_result = ToolResultNormalizer.normalize_error(
             tool_name, method_name, preflight.status, preflight.message
         )
@@ -230,6 +266,7 @@ async def execute_tool_node(state: AgentState) -> Dict[str, Any]:
         # 3. Execute Tool via Registry
         try:
             result = await ToolRegistry.execute_tool(state["workspace_id"], tool_name, method_name, args)
+            log_info(f"[Tool Execution Completed] integration_name={integration_id} integration_status=READY selected_tool_name={tool_name} method_name={method_name}")
             
             # If the provider returned a dictionary error/result directly
             if isinstance(result, dict):
@@ -237,6 +274,7 @@ async def execute_tool_node(state: AgentState) -> Dict[str, Any]:
             else:
                 normalized_result = ToolResultNormalizer.normalize_response(tool_name, method_name, result)
         except Exception as e:
+            log_error(f"[Tool Execution Failed] selected_tool_name={tool_name} method_name={method_name}", exc=e)
             normalized_result = ToolResultNormalizer.normalize_error(
                 tool_name, method_name, "PROVIDER_ERROR", str(e)
             )

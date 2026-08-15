@@ -90,6 +90,9 @@ class GeminiProvider(LLMProvider):
         if system_prompt:
             payload["systemInstruction"] = {"parts": [{"text": system_prompt}]}
 
+        if functions:
+            payload["tools"] = [{"functionDeclarations": functions}]
+
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
                 res = await client.post(url, json=payload, headers={"Content-Type": "application/json"})
@@ -97,8 +100,23 @@ class GeminiProvider(LLMProvider):
                     raise Exception(f"Gemini API returned status {res.status_code}: {res.text}")
                 
                 data = res.json()
-                text = data["candidates"][0]["content"]["parts"][0]["text"]
-                return text
+                candidates = data.get("candidates", [])
+                if not candidates:
+                    return ""
+                
+                candidate_content = candidates[0].get("content", {})
+                parts = candidate_content.get("parts", [])
+                
+                for part in parts:
+                    if "functionCall" in part:
+                        fc = part["functionCall"]
+                        fname = fc.get("name")
+                        fargs = fc.get("args", {})
+                        log_info(f"[Gemini Provider] Native functionCall triggered: selected_tool_name={fname} tool_arguments={fargs}")
+                        return f'TOOL_CALL:{{"tool": "{fname}", "args": {json.dumps(fargs)}}}'
+                    elif "text" in part:
+                        return part["text"]
+                return ""
         except Exception as e:
             log_error("Gemini API execution failed", exc=e)
             raise e

@@ -395,6 +395,7 @@ class ConversationService:
                     raw = re.sub(r"^```(?:json)?\s*", "", raw)
                     raw = re.sub(r"\s*```$", "", raw).strip()
                 
+                parsed = None
                 # Extract first valid JSON object
                 if raw.startswith("{"):
                     open_braces = 0
@@ -409,11 +410,31 @@ class ConversationService:
                                 break
                     if end_idx != -1:
                         json_str = raw[:end_idx]
-                        return json.loads(json_str)
-                
-                # Fallback: single line
-                line = raw.split("\n")[0].strip()
-                return json.loads(line)
+                        parsed = json.loads(json_str)
+                else:
+                    line = raw.split("\n")[0].strip()
+                    parsed = json.loads(line)
+
+                if isinstance(parsed, dict):
+                    tool_val = parsed.get("tool") or parsed.get("name") or ""
+                    method_val = parsed.get("method", "")
+                    args_val = parsed.get("args") if "args" in parsed else parsed.get("arguments", {})
+                    
+                    if "_" in tool_val and not method_val:
+                        if tool_val.startswith("calendar_"):
+                            method_val = tool_val.replace("calendar_", "")
+                            tool_val = "GoogleCalendar"
+                        elif tool_val.startswith("gmail_"):
+                            method_val = tool_val.replace("gmail_", "")
+                            tool_val = "Gmail"
+                        elif tool_val.startswith("gdrive_"):
+                            method_val = tool_val.replace("gdrive_", "")
+                            tool_val = "GoogleDrive"
+                        elif tool_val.startswith("slack_"):
+                            method_val = tool_val.replace("slack_", "")
+                            tool_val = "Slack"
+
+                    return {"tool": tool_val, "method": method_val, "args": args_val}
             except Exception:
                 pass
 
