@@ -50,21 +50,27 @@ class TestToolExecutionLayer(unittest.TestCase):
         self.assertEqual(parsed["method"], "create_event")
         self.assertEqual(parsed["args"]["summary"], "Investor Meeting")
 
+    def test_tool_dispatcher_resolution(self):
+        target = ToolExecutor.TOOL_DISPATCHER.get("GoogleCalendar.createEvent")
+        self.assertIsNotNone(target)
+        self.assertEqual(target[0], "int_gcal")
+        self.assertEqual(target[1], "create_event")
+
     def test_response_formatter_calendar_block(self):
         tool_result = {
             "success": True,
-            "tool": "GoogleCalendar",
-            "method": "create_event",
+            "integration": "google_calendar",
+            "tool": "createEvent",
             "data": {
-                "id": "evt_999",
-                "summary": "Investor Call",
-                "start": {"dateTime": "2026-08-16T13:00:00Z"},
-                "end": {"dateTime": "2026-08-16T13:30:00Z"},
-                "status": "confirmed"
+                "event_id": "evt_999",
+                "title": "Investor Meeting",
+                "start_time": "2026-08-16T15:00:00+05:30",
+                "end_time": "2026-08-16T16:00:00+05:30",
+                "html_link": "https://calendar.google.com/event?id=evt_999"
             }
         }
         res = ResponseFormatter.format_response(
-            message="Scheduled meeting 'Investor Call' for tomorrow at 1:00 PM.",
+            message="Scheduled meeting 'Investor Meeting' for tomorrow at 3:00 PM.",
             tool_result=tool_result
         )
         data_dict = res.model_dump()

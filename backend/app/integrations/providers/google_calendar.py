@@ -147,38 +147,40 @@ class GoogleCalendarProvider(BaseIntegrationProvider):
             return {}
 
     async def execute(self, workspace_id: str, method: str, args: dict) -> dict:
+    async def execute(self, workspace_id: str, method: str, args: dict) -> dict:
         """Execute a Google Calendar action using real API calls and return structured dict."""
+        log_info(f"[AUTH] Firebase user workspace verified: {workspace_id}")
         creds = load_credentials(workspace_id, self.INTEGRATION_ID)
         if not creds or not creds.get("access_token"):
+            log_info(f"[AUTH] OAuth credentials missing for Google Calendar workspace: {workspace_id}")
             from app.ai.integration.normalizer import ToolResultNormalizer
             return ToolResultNormalizer.normalize_error(
                 "GoogleCalendar", method, "NOT_CONNECTED", "Google Calendar integration is disconnected."
             )
+
+        log_info(f"[AUTH] OAuth credentials available for workspace {workspace_id}")
+        log_info(f"[INTEGRATION] Google Calendar connected for workspace {workspace_id}")
 
         try:
             service = self._get_calendar_service(creds)
             method_lower = method.lower()
 
             if "list" in method_lower or "availability" in method_lower:
-                res = await self._list_events(service, args)
+                return await self._list_events(service, args)
             elif "create" in method_lower or "schedule" in method_lower:
-                res = await self._create_event(service, args)
+                return await self._create_event(service, args)
             elif "cancel" in method_lower or "delete" in method_lower:
-                res = await self._delete_event(service, args)
+                return await self._delete_event(service, args)
             elif "update" in method_lower:
-                res = await self._update_event(service, args)
+                return await self._update_event(service, args)
             else:
                 from app.ai.integration.normalizer import ToolResultNormalizer
                 return ToolResultNormalizer.normalize_error(
                     "GoogleCalendar", method, "CONFIGURATION_ERROR", f"Unknown method '{method}'."
                 )
-            
-            # Return normalized dictionary result
-            from app.ai.integration.normalizer import ToolResultNormalizer
-            return ToolResultNormalizer.normalize_response("GoogleCalendar", method, res)
 
         except Exception as e:
-            log_error(f"Google Calendar execute failed for method {method}", exc=e)
+            log_error(f"[GOOGLE] API execution error for method {method}", exc=e)
             err_msg = str(e).lower()
             err_code = "PROVIDER_ERROR"
             action_req = "Verify integration settings."
@@ -190,29 +192,42 @@ class GoogleCalendarProvider(BaseIntegrationProvider):
                 err_code = "REAUTH_REQUIRED"
                 action_req = "Reconnect your Google Calendar integration."
             
-            from app.ai.integration.normalizer import ToolResultNormalizer
-            return ToolResultNormalizer.normalize_error(
-                "GoogleCalendar", method, err_code, str(e), action_req
-            )
+            return {
+                "success": False,
+                "integration": "google_calendar",
+                "tool": method,
+                "error_code": err_code,
+                "message": str(e),
+                "action": action_req
+            }
 
-    async def _list_events(self, service, args: dict) -> list:
+    async def _list_events(self, service, args: dict) -> dict:
         import datetime
         from dateutil import parser as dtparser
-        calendar_id = args.get("calendar_id", "primary")
-        
-        raw_min = args.get("time_min", args.get("start_time", ""))
-        raw_max = args.get("time_max", args.get("end_time", ""))
-        max_results = int(args.get("max_results", 10))
+        from zoneinfo import ZoneInfo
+
+        tz_str = args.get("timezone") or args.get("timeZone") or "Asia/Kolkata"
+        try:
+            tz = ZoneInfo(tz_str)
+        except Exception:
+            tz = ZoneInfo("Asia/Kolkata")
+            tz_str = "Asia/Kolkata"
+
+        calendar_id = args.get("calendar_id") or args.get("calendarId") or "primary"
+        raw_min = args.get("time_min") or args.get("timeMin") or args.get("start_time") or args.get("startTime") or ""
+        raw_max = args.get("time_max") or args.get("timeMax") or args.get("end_time") or args.get("endTime") or ""
+        max_results = int(args.get("max_results") or args.get("maxResults") or 10)
 
         if raw_min:
             try:
-                time_min = dtparser.parse(raw_min).isoformat()
-                if not time_min.endswith("Z") and "+" not in time_min and "-" not in time_min[10:]:
-                    time_min += "Z"
+                dt_min = dtparser.parse(raw_min)
+                if dt_min.tzinfo is None:
+                    dt_min = dt_min.replace(tzinfo=tz)
+                time_min = dt_min.isoformat()
             except Exception:
-                time_min = datetime.datetime.utcnow().isoformat() + "Z"
+                time_min = datetime.datetime.now(tz).isoformat()
         else:
-            time_min = datetime.datetime.utcnow().isoformat() + "Z"
+            time_min = datetime.datetime.now(tz).isoformat()
 
         params = {
             "calendarId": calendar_id,
@@ -223,89 +238,227 @@ class GoogleCalendarProvider(BaseIntegrationProvider):
         }
         if raw_max:
             try:
-                time_max = dtparser.parse(raw_max).isoformat()
-                if not time_max.endswith("Z") and "+" not in time_max and "-" not in time_max[10:]:
-                    time_max += "Z"
-                params["timeMax"] = time_max
+                dt_max = dtparser.parse(raw_max)
+                if dt_max.tzinfo is None:
+                    dt_max = dt_max.replace(tzinfo=tz)
+                params["timeMax"] = dt_max.isoformat()
             except Exception:
                 pass
 
+        log_info(f"[GOOGLE] Listing calendar events timeMin={time_min}")
         result = service.events().list(**params).execute()
-        return result.get("items", [])
+        log_info(f"[GOOGLE] API response: 200")
+        
+        events = []
+        for item in result.get("items", []):
+            events.append({
+                "event_id": item.get("id"),
+                "title": item.get("summary", "No Title"),
+                "start_time": item.get("start", {}).get("dateTime", item.get("start", {}).get("date", "")),
+                "end_time": item.get("end", {}).get("dateTime", item.get("end", {}).get("date", "")),
+                "html_link": item.get("htmlLink", "")
+            })
+
+        return {
+            "success": True,
+            "integration": "google_calendar",
+            "tool": "listEvents",
+            "data": {
+                "count": len(events),
+                "events": events
+            }
+        }
 
     async def _create_event(self, service, args: dict) -> dict:
         import datetime
         from dateutil import parser as dtparser
-        calendar_id = args.get("calendar_id", "primary")
-        summary = args.get("summary", args.get("title", args.get("name", "New Meeting")))
-        start = args.get("start_time", args.get("start", ""))
-        end = args.get("end_time", args.get("end", ""))
+        from zoneinfo import ZoneInfo
+
+        tz_str = args.get("timezone") or args.get("timeZone") or "Asia/Kolkata"
+        if tz_str == "UTC":
+            tz_str = "Asia/Kolkata"
+
+        try:
+            tz = ZoneInfo(tz_str)
+        except Exception:
+            tz = ZoneInfo("Asia/Kolkata")
+            tz_str = "Asia/Kolkata"
+
+        calendar_id = args.get("calendar_id") or args.get("calendarId") or "primary"
+        summary = args.get("summary") or args.get("title") or args.get("name") or "New Meeting"
+        start = args.get("start_time") or args.get("startTime") or args.get("start") or ""
+        end = args.get("end_time") or args.get("endTime") or args.get("end") or ""
         description = args.get("description", "")
         attendees = args.get("attendees", [])
-        timezone = args.get("timezone", "UTC")
 
+        now = datetime.datetime.now(tz)
         start_dt = None
         if start:
             try:
                 start_dt = dtparser.parse(start)
+                if start_dt.tzinfo is None:
+                    start_dt = start_dt.replace(tzinfo=tz)
             except Exception:
                 pass
 
         if not start_dt:
-            start_dt = datetime.datetime.utcnow() + datetime.timedelta(days=1)
-            start_dt = start_dt.replace(hour=13, minute=0, second=0, microsecond=0)
+            start_dt = now + datetime.timedelta(days=1)
+            start_dt = start_dt.replace(hour=15, minute=0, second=0, microsecond=0)
 
         end_dt = None
         if end:
             try:
                 end_dt = dtparser.parse(end)
+                if end_dt.tzinfo is None:
+                    end_dt = end_dt.replace(tzinfo=tz)
             except Exception:
                 pass
         if not end_dt:
-            end_dt = start_dt + datetime.timedelta(minutes=30)
+            end_dt = start_dt + datetime.timedelta(hours=1)
 
         event_body = {
             "summary": summary,
             "description": description,
-            "start": {"dateTime": start_dt.isoformat(), "timeZone": timezone},
-            "end": {"dateTime": end_dt.isoformat(), "timeZone": timezone},
+            "start": {"dateTime": start_dt.isoformat(), "timeZone": tz_str},
+            "end": {"dateTime": end_dt.isoformat(), "timeZone": tz_str},
         }
         if attendees:
             if isinstance(attendees, str):
                 attendees = [a.strip() for a in attendees.split(",") if a.strip()]
             event_body["attendees"] = [{"email": a} for a in attendees if isinstance(a, str)]
 
+        log_info(f"[GOOGLE] Creating calendar event '{summary}' for {start_dt.isoformat()} ({tz_str})")
         result = service.events().insert(calendarId=calendar_id, body=event_body).execute()
-        return result
+        
+        event_id = result.get("id", "unknown_id")
+        html_link = result.get("htmlLink", "")
+        log_info(f"[GOOGLE] API response: 200")
+        log_info(f"[GOOGLE] Event created: {event_id}")
+
+        return {
+            "success": True,
+            "integration": "google_calendar",
+            "tool": "createEvent",
+            "data": {
+                "event_id": event_id,
+                "title": summary,
+                "start_time": start_dt.isoformat(),
+                "end_time": end_dt.isoformat(),
+                "html_link": html_link
+            }
+        }
 
     async def _delete_event(self, service, args: dict) -> dict:
-        calendar_id = args.get("calendar_id", "primary")
-        event_id = args.get("event_id")
-        if not event_id:
-            raise ValueError("event_id is required.")
+        calendar_id = args.get("calendar_id") or args.get("calendarId") or "primary"
+        event_id = args.get("event_id") or args.get("eventId") or ""
+        summary = args.get("summary") or args.get("title") or args.get("name") or ""
 
+        if not event_id and summary:
+            search_res = await self._list_events(service, {"max_results": 20})
+            ev_list = search_res.get("data", {}).get("events", [])
+            for ev in ev_list:
+                if summary.lower() in ev.get("title", "").lower():
+                    event_id = ev.get("event_id")
+                    break
+
+        if not event_id:
+            return {
+                "success": False,
+                "integration": "google_calendar",
+                "tool": "deleteEvent",
+                "message": "Event ID not provided and no matching event found."
+            }
+
+        log_info(f"[GOOGLE] Deleting calendar event {event_id}")
         service.events().delete(calendarId=calendar_id, eventId=event_id).execute()
-        return {"id": event_id, "status": "deleted"}
+        log_info(f"[GOOGLE] API response: 200")
+
+        return {
+            "success": True,
+            "integration": "google_calendar",
+            "tool": "deleteEvent",
+            "data": {
+                "event_id": event_id,
+                "status": "deleted"
+            }
+        }
 
     async def _update_event(self, service, args: dict) -> dict:
-        calendar_id = args.get("calendar_id", "primary")
-        event_id = args.get("event_id")
+        import datetime
+        from dateutil import parser as dtparser
+        from zoneinfo import ZoneInfo
+
+        tz_str = args.get("timezone") or args.get("timeZone") or "Asia/Kolkata"
+        try:
+            tz = ZoneInfo(tz_str)
+        except Exception:
+            tz = ZoneInfo("Asia/Kolkata")
+            tz_str = "Asia/Kolkata"
+
+        calendar_id = args.get("calendar_id") or args.get("calendarId") or "primary"
+        event_id = args.get("event_id") or args.get("eventId") or ""
+        summary = args.get("summary") or args.get("title") or args.get("name") or ""
+        start = args.get("start_time") or args.get("startTime") or args.get("start") or ""
+        end = args.get("end_time") or args.get("endTime") or args.get("end") or ""
+
         if not event_id:
-            raise ValueError("event_id is required.")
+            # Match upcoming events to find event_id
+            search_res = await self._list_events(service, {"max_results": 20, "timezone": tz_str})
+            ev_list = search_res.get("data", {}).get("events", [])
+            for ev in ev_list:
+                if summary and summary.lower() in ev.get("title", "").lower():
+                    event_id = ev.get("event_id")
+                    break
+                elif not summary and ev_list:
+                    event_id = ev_list[0].get("event_id")
+                    break
+
+        if not event_id:
+            return {
+                "success": False,
+                "integration": "google_calendar",
+                "tool": "updateEvent",
+                "message": "Event ID not provided and no matching event found."
+            }
 
         event = service.events().get(calendarId=calendar_id, eventId=event_id).execute()
 
-        if "summary" in args:
-            event["summary"] = args["summary"]
+        if summary:
+            event["summary"] = summary
         if "description" in args:
             event["description"] = args["description"]
-        if "start_time" in args or "start" in args:
-            event["start"]["dateTime"] = args.get("start_time", args.get("start"))
-        if "end_time" in args or "end" in args:
-            event["end"]["dateTime"] = args.get("end_time", args.get("end"))
 
+        if start:
+            start_dt = dtparser.parse(start)
+            if start_dt.tzinfo is None:
+                start_dt = start_dt.replace(tzinfo=tz)
+            event["start"] = {"dateTime": start_dt.isoformat(), "timeZone": tz_str}
+            if not end:
+                end_dt = start_dt + datetime.timedelta(hours=1)
+                event["end"] = {"dateTime": end_dt.isoformat(), "timeZone": tz_str}
+
+        if end:
+            end_dt = dtparser.parse(end)
+            if end_dt.tzinfo is None:
+                end_dt = end_dt.replace(tzinfo=tz)
+            event["end"] = {"dateTime": end_dt.isoformat(), "timeZone": tz_str}
+
+        log_info(f"[GOOGLE] Updating calendar event {event_id}")
         result = service.events().update(calendarId=calendar_id, eventId=event_id, body=event).execute()
-        return result
+        log_info(f"[GOOGLE] API response: 200")
+
+        return {
+            "success": True,
+            "integration": "google_calendar",
+            "tool": "updateEvent",
+            "data": {
+                "event_id": result.get("id"),
+                "title": result.get("summary"),
+                "start_time": result.get("start", {}).get("dateTime"),
+                "end_time": result.get("end", {}).get("dateTime"),
+                "html_link": result.get("htmlLink", "")
+            }
+        }
 
     def capabilities(self) -> list:
         return ["Check availability", "Create events", "Update meetings", "Cancel bookings"]
