@@ -97,6 +97,9 @@ class GoogleCalendarProvider(BaseIntegrationProvider):
             "health": 100,
             "config": payload.get("configuration", {}),
             "connected_account": connected_account,
+            "name": "Google Calendar",
+            "category": "Productivity",
+            "description": "Schedule meetings and manage availability.",
         }
         doc_ref.set(integration_data, merge=True)
         log_info(f"Google Calendar connected for workspace {workspace_id}")
@@ -146,7 +149,6 @@ class GoogleCalendarProvider(BaseIntegrationProvider):
             log_error("Google Calendar token refresh failed", exc=e)
             return {}
 
-    async def execute(self, workspace_id: str, method: str, args: dict) -> dict:
     async def execute(self, workspace_id: str, method: str, args: dict) -> dict:
         """Execute a Google Calendar action using real API calls and return structured dict."""
         log_info(f"[AUTH] Firebase user workspace verified: {workspace_id}")

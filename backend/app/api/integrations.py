@@ -16,7 +16,29 @@ FRONTEND_BASE_URL = os.getenv("FRONTEND_BASE_URL", "http://localhost:5173")
 @router.get("", response_model=List[IntegrationResponse])
 async def list_integrations(workspace_id: str = Depends(get_user_workspace_id)):
     """Exposes all supported integrations and connection status states."""
-    return await IntegrationService.list_integrations(workspace_id)
+    try:
+        return await IntegrationService.list_integrations(workspace_id)
+    except Exception as e:
+        from app.utils.logger import log_error
+        log_error("Failed to list integrations", exc=e)
+        return JSONResponse(status_code=500, content={"detail": f"Failed to list integrations: {str(e)}"})
+
+@router.get("/{integration_id}", response_model=IntegrationResponse)
+async def get_integration(
+    integration_id: str,
+    workspace_id: str = Depends(get_user_workspace_id)
+):
+    """Fetches single integration state by ID."""
+    try:
+        integrations = await IntegrationService.list_integrations(workspace_id)
+        for item in integrations:
+            if item.get("id") == integration_id:
+                return item
+        return JSONResponse(status_code=404, content={"detail": f"Integration {integration_id} not found"})
+    except Exception as e:
+        from app.utils.logger import log_error
+        log_error(f"Failed to fetch integration {integration_id}", exc=e)
+        return JSONResponse(status_code=500, content={"detail": f"Failed to fetch integration: {str(e)}"})
 
 @router.post("/{integration_id}/connect", response_model=IntegrationResponse)
 async def connect_integration(
@@ -25,11 +47,16 @@ async def connect_integration(
     workspace_id: str = Depends(get_user_workspace_id)
 ):
     """Establishes a sync target with external tools using connection credentials."""
-    return await IntegrationService.connect_integration(
-        workspace_id=workspace_id,
-        integration_id=integration_id,
-        payload=payload.model_dump()
-    )
+    try:
+        return await IntegrationService.connect_integration(
+            workspace_id=workspace_id,
+            integration_id=integration_id,
+            payload=payload.model_dump()
+        )
+    except Exception as e:
+        from app.utils.logger import log_error
+        log_error(f"Failed to connect integration {integration_id}", exc=e)
+        return JSONResponse(status_code=500, content={"detail": f"Failed to connect integration: {str(e)}"})
 
 @router.delete("/{integration_id}")
 async def disconnect_integration(
@@ -37,8 +64,13 @@ async def disconnect_integration(
     workspace_id: str = Depends(get_user_workspace_id)
 ):
     """Disconnects workspace integration parameters."""
-    await IntegrationService.disconnect_integration(workspace_id, integration_id)
-    return {"detail": f"Successfully disconnected integration {integration_id}"}
+    try:
+        await IntegrationService.disconnect_integration(workspace_id, integration_id)
+        return {"detail": f"Successfully disconnected integration {integration_id}"}
+    except Exception as e:
+        from app.utils.logger import log_error
+        log_error(f"Failed to disconnect integration {integration_id}", exc=e)
+        return JSONResponse(status_code=500, content={"detail": f"Failed to disconnect integration: {str(e)}"})
 
 @router.get("/{integration_id}/health", response_model=IntegrationHealthResponse)
 async def verify_integration_health(
@@ -46,7 +78,12 @@ async def verify_integration_health(
     workspace_id: str = Depends(get_user_workspace_id)
 ):
     """Queries external endpoints to run real-time integration connection health diagnostics."""
-    return await IntegrationService.check_health(workspace_id, integration_id)
+    try:
+        return await IntegrationService.check_health(workspace_id, integration_id)
+    except Exception as e:
+        from app.utils.logger import log_error
+        log_error(f"Failed health check for {integration_id}", exc=e)
+        return JSONResponse(status_code=500, content={"healthy": False, "status": "error", "last_check": "Just now"})
 
 # ─── New OAuth Routes ─────────────────────────────────────────────────────────
 

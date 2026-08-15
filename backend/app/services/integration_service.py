@@ -152,7 +152,7 @@ class IntegrationService:
                 for adoc in agent_docs:
                     adata = adoc.to_dict()
                     if adata.get("workspace_id") == workspace_id:
-                        agent_id = adata.get("id")
+                        agent_id = adoc.id
                         agent_name = adata.get("name")
                         
                         should_have_tool = (agent_id in synced_agents) or (agent_name in synced_agents)
@@ -205,6 +205,40 @@ class IntegrationService:
     async def disconnect_integration(workspace_id: str, integration_id: str) -> None:
         provider = IntegrationService._get_provider(integration_id)
         await provider.disconnect(workspace_id)
+        
+        # Remove integration tools from agents in this workspace
+        try:
+            id_to_name = {
+                "int_gcal": "Google Calendar",
+                "int_gmail": "Gmail",
+                "int_gdrive": "Google Drive",
+                "int_gmeet": "Google Meet",
+                "int_slack": "Slack",
+                "int_whatsapp": "WhatsApp Business",
+                "int_hubspot": "HubSpot",
+                "int_razorpay": "Razorpay",
+                "int_shopify": "Shopify",
+                "int_google_maps": "Google Maps",
+                "int_elevenlabs": "ElevenLabs",
+                "int_fcm": "Firebase Cloud Messaging",
+                "int_rest_api": "REST API"
+            }
+            int_name = id_to_name.get(integration_id)
+            if int_name:
+                agents_coll = firestore_client.collection("agents")
+                agent_docs = agents_coll.stream()
+                for adoc in agent_docs:
+                    adata = adoc.to_dict()
+                    if adata.get("workspace_id") == workspace_id:
+                        agent_id = adoc.id
+                        tools = adata.get("tools", [])
+                        new_tools = [t for t in tools if t != int_name and t != integration_id]
+                        if new_tools != tools:
+                            firestore_client.collection("agents").document(agent_id).update({"tools": new_tools})
+                            log_info(f"Removed tool {int_name} from Agent {agent_id} on disconnect")
+        except Exception as e:
+            log_error(f"Failed to remove tools from agents on disconnect for {integration_id}", exc=e)
+
         log_info(f"Disconnected integration {integration_id} from workspace {workspace_id}")
 
     @staticmethod
