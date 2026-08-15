@@ -118,7 +118,7 @@ class IntegrationPreflight:
 
             # Validate scopes if available
             if "scope" in creds:
-                scopes = creds.get("scope", "")
+                scopes = creds.get("scope") or ""
                 # Google specific scope check
                 if integration_id == "int_gcal":
                     required = ["calendar.events", "calendar"]

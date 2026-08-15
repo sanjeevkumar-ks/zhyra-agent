@@ -87,17 +87,18 @@ class AgentRuntime:
         try:
             final_state = await compiled_agent_graph.ainvoke(initial_state)
             
+            raw_msg = final_state.get("ai_text") or ""
             # Format output using ResponseFormatter to get structured blocks
             from app.ai.response.response_formatter import ResponseFormatter
             structured = ResponseFormatter.format_response(
-                message=final_state.get("ai_text", ""),
+                message=raw_msg,
                 tool_call=final_state.get("tool_call"),
                 tool_result=final_state.get("tool_result")
             )
             
             res_dict = structured.model_dump()
             # Maintain backward compatibility fields
-            res_dict["text"] = res_dict["message"]
+            res_dict["text"] = res_dict.get("message") or raw_msg or ""
             res_dict["intent"] = final_state.get("intent", "Inquire details")
             res_dict["confidence"] = final_state.get("confidence", 95)
             res_dict["knowledge_used"] = final_state.get("cited_sources", [])

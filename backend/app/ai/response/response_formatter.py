@@ -15,6 +15,9 @@ class ResponseFormatter:
         Formats final LLM agent response and tool execution outcome 
         into a structured response with Pydantic block nodes.
         """
+        if message is None:
+            message = ""
+
         blocks: List[ResponseBlock] = []
         execution_status = "completed"
         integration_used = None

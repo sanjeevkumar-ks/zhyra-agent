@@ -217,7 +217,7 @@ class ConversationService:
         }
         yield f"__METADATA__:{json.dumps(meta_payload)}\n"
 
-        accumulated_text = ai_reply.get("text", "")
+        accumulated_text = ai_reply.get("text") or ""
         # Yield in small typing simulation chunks to preserve visual streaming UI animations
         chunk_size = 12
         for idx in range(0, len(accumulated_text), chunk_size):

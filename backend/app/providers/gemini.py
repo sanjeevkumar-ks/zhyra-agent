@@ -104,18 +104,19 @@ class GeminiProvider(LLMProvider):
                 if not candidates:
                     return ""
                 
-                candidate_content = candidates[0].get("content", {})
-                parts = candidate_content.get("parts", [])
+                candidate_content = candidates[0].get("content") or {}
+                parts = candidate_content.get("parts") or []
                 
                 for part in parts:
-                    if "functionCall" in part:
-                        fc = part["functionCall"]
-                        fname = fc.get("name")
-                        fargs = fc.get("args", {})
-                        log_info(f"[Gemini Provider] Native functionCall triggered: selected_tool_name={fname} tool_arguments={fargs}")
-                        return f'TOOL_CALL:{{"tool": "{fname}", "args": {json.dumps(fargs)}}}'
-                    elif "text" in part:
-                        return part["text"]
+                    if isinstance(part, dict):
+                        if "functionCall" in part:
+                            fc = part.get("functionCall") or {}
+                            fname = fc.get("name") or "GoogleCalendar.createEvent"
+                            fargs = fc.get("args") or {}
+                            log_info(f"[Gemini Provider] Native functionCall triggered: selected_tool_name={fname} tool_arguments={fargs}")
+                            return f'TOOL_CALL:{{"tool": "{fname}", "args": {json.dumps(fargs)}}}'
+                        elif "text" in part:
+                            return part.get("text") or ""
                 return ""
         except Exception as e:
             log_error("Gemini API execution failed", exc=e)

@@ -323,6 +323,7 @@ async def exchange_google_code(code: str, state: str) -> Dict:
         "access_token": tokens.get("access_token", ""),
         "refresh_token": tokens.get("refresh_token", ""),
         "expires_in": tokens.get("expires_in", 3600),
+        "scope": tokens.get("scope") or " ".join(GOOGLE_SCOPES.get(state_data["integration_id"], [])),
         "token_type": tokens.get("token_type", "Bearer"),
         "email": email,
         "workspace_id": state_data["workspace_id"],
