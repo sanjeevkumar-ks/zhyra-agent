@@ -6,8 +6,13 @@ from app.utils.logger import log_error, log_info
 security_scheme = HTTPBearer(auto_error=False)
 
 # Configuration keys
-BYPASS_AUTH = os.getenv("FIREBASE_BYPASS_AUTH", "false").lower() == "true"
 MOCK_USER_ID = os.getenv("MOCK_USER_ID", "usr_admin_test")
+
+def is_bypass_auth() -> bool:
+    # Never allow auth bypass when running on Vercel / production
+    if os.getenv("VERCEL") or os.getenv("VERCEL_ENV"):
+        return False
+    return os.getenv("FIREBASE_BYPASS_AUTH", "false").lower() == "true"
 
 class AuthUser:
     def __init__(self, uid: str, email: str = "", name: str = "", picture: str = ""):
@@ -25,7 +30,7 @@ async def get_current_user(
     If FIREBASE_BYPASS_AUTH is enabled, returns a mock user.
     """
     # 1. Check for bypass in local development
-    if BYPASS_AUTH:
+    if is_bypass_auth():
         # Check if caller wants a specific mock ID
         mock_uid = request.headers.get("X-Mock-User-Id", MOCK_USER_ID)
         return AuthUser(

@@ -53,6 +53,7 @@ async def verify_integration_health(
 @router.get("/oauth/authorize/{integration_id}")
 async def get_oauth_authorize_url(
     integration_id: str,
+    request: Request,
     workspace_id: str = Depends(get_user_workspace_id),
     shop: str = Query(default="", description="Required for Shopify OAuth: your myshopify.com domain")
 ):
@@ -73,7 +74,7 @@ async def get_oauth_authorize_url(
 
     try:
         if integration_id in google_integrations:
-            oauth_url, state = generate_google_oauth_url(workspace_id, integration_id)
+            oauth_url, state = generate_google_oauth_url(workspace_id, integration_id, request)
         elif integration_id == "int_slack":
             oauth_url, state = generate_slack_oauth_url(workspace_id, integration_id)
         elif integration_id == "int_hubspot":

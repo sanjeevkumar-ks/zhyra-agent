@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Import routers
+from app.middleware.auth import is_bypass_auth
 from app.api import (
     auth, users, workspaces, agents, conversations,
     knowledge, voice, settings, providers, integrations,
@@ -88,7 +89,7 @@ async def health_check():
     return {
         "status": "ok",
         "timestamp": time.time(),
-        "bypass_auth": os.getenv("FIREBASE_BYPASS_AUTH") == "true",
+        "bypass_auth": is_bypass_auth(),
         "version": "1.0.0"
     }
 

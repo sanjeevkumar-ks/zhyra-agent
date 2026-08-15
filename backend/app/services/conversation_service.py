@@ -342,14 +342,24 @@ class ConversationService:
             )
             
             if "int_gcal" in connected_tools:
-                tools_instructions += "- GoogleCalendar.list_events(calendar_id: str = 'primary') -> returns schedule list\n"
-                tools_instructions += "- GoogleCalendar.create_event(calendar_id: str = 'primary', summary: str, start_time: str, end_time: str) -> schedules a slot\n"
+                tools_instructions += "- GoogleCalendar.list_events(calendar_id: str = 'primary', time_min: str = None, time_max: str = None) -> lists scheduled calendar events\n"
+                tools_instructions += "- GoogleCalendar.create_event(summary: str, start_time: str, end_time: str = None, description: str = '', timezone: str = 'UTC', calendar_id: str = 'primary') -> schedules a meeting/event\n"
+                tools_instructions += "- GoogleCalendar.update_event(event_id: str, summary: str = None, start_time: str = None, end_time: str = None, calendar_id: str = 'primary') -> updates existing event\n"
+                tools_instructions += "- GoogleCalendar.delete_event(event_id: str, calendar_id: str = 'primary') -> cancels/deletes event\n"
             if "int_gmail" in connected_tools:
-                tools_instructions += "- Gmail.send_email(to: str, subject: str, body: str) -> sends email notification\n"
+                tools_instructions += "- Gmail.send_email(to: str, subject: str, body: str) -> sends an email\n"
+                tools_instructions += "- Gmail.search_emails(query: str, max_results: int = 5) -> searches emails by query/sender/subject\n"
+                tools_instructions += "- Gmail.read_email(message_id: str) -> reads full email message\n"
             if "int_whatsapp" in connected_tools:
                 tools_instructions += "- WhatsApp.send_message(phone: str, text: str) -> sends WhatsApp message\n"
             if "int_gdrive" in connected_tools:
-                tools_instructions += "- GoogleDrive.list_files() -> lists knowledge documents\n"
+                tools_instructions += "- GoogleDrive.list_files(query: str = None) -> lists files in Drive\n"
+                tools_instructions += "- GoogleDrive.search_files(query: str) -> searches documents in Drive\n"
+            if "int_slack" in connected_tools:
+                tools_instructions += "- Slack.send_message(channel: str, text: str) -> posts message to Slack channel\n"
+            if "int_hubspot" in connected_tools:
+                tools_instructions += "- HubSpot.get_contact(email: str) -> retrieves CRM contact\n"
+                tools_instructions += "- HubSpot.create_contact(email: str, firstname: str = None, lastname: str = None) -> creates new lead/contact\n"
             if "int_razorpay" in connected_tools:
                 tools_instructions += "- Razorpay.get_payment(payment_id: str) -> retrieves transaction info\n"
                 tools_instructions += "- Razorpay.create_refund(payment_id: str, amount: float = None) -> processes a refund\n"

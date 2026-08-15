@@ -32,12 +32,18 @@ from app.utils.logger import log_info, log_error
 BACKEND_BASE_URL = os.getenv("BACKEND_BASE_URL", "http://localhost:8000")
 FRONTEND_BASE_URL = os.getenv("FRONTEND_BASE_URL", "http://localhost:5173")
 
+def get_backend_base_url(request: Optional[object] = None) -> str:
+    backend_url = os.getenv("BACKEND_BASE_URL")
+    if backend_url:
+        return backend_url.rstrip("/")
+    if request and hasattr(request, "base_url"):
+        return str(request.base_url).rstrip("/")
+    return BACKEND_BASE_URL
+
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
 GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET", "")
-GOOGLE_REDIRECT_URI = os.getenv(
-    "GOOGLE_REDIRECT_URI",
-    f"{BACKEND_BASE_URL}/api/integrations/oauth/callback/google"
-)
+def get_google_redirect_uri(request: Optional[object] = None) -> str:
+    return os.getenv("GOOGLE_REDIRECT_URI") or f"{get_backend_base_url(request)}/api/integrations/oauth/callback/google"
 
 SLACK_CLIENT_ID = os.getenv("SLACK_CLIENT_ID", "")
 SLACK_CLIENT_SECRET = os.getenv("SLACK_CLIENT_SECRET", "")
@@ -167,7 +173,7 @@ def _consume_oauth_state(state: str) -> Optional[Dict]:
 
 # ─── URL Generation ───────────────────────────────────────────────────────────
 
-def generate_google_oauth_url(workspace_id: str, integration_id: str) -> Tuple[str, str]:
+def generate_google_oauth_url(workspace_id: str, integration_id: str, request: Optional[object] = None) -> Tuple[str, str]:
     """
     Generate a Google OAuth2 authorization URL.
     
@@ -177,13 +183,14 @@ def generate_google_oauth_url(workspace_id: str, integration_id: str) -> Tuple[s
     if not GOOGLE_CLIENT_ID:
         raise ValueError("GOOGLE_CLIENT_ID environment variable is not configured.")
 
+    redirect_uri = get_google_redirect_uri(request)
     scopes = GOOGLE_SCOPES.get(integration_id, GOOGLE_SCOPES["int_gcal"])
     state = secrets.token_urlsafe(32)
-    _save_oauth_state(state, workspace_id, integration_id, "google")
+    _save_oauth_state(state, workspace_id, integration_id, "google", {"redirect_uri": redirect_uri})
 
     params = {
         "client_id": GOOGLE_CLIENT_ID,
-        "redirect_uri": GOOGLE_REDIRECT_URI,
+        "redirect_uri": redirect_uri,
         "response_type": "code",
         "scope": " ".join(scopes),
         "access_type": "offline",
@@ -282,6 +289,8 @@ async def exchange_google_code(code: str, state: str) -> Dict:
     if not state_data:
         raise ValueError("Invalid or expired OAuth state. Please restart the OAuth flow.")
 
+    redirect_uri = state_data.get("extra", {}).get("redirect_uri") or get_google_redirect_uri()
+
     async with httpx.AsyncClient() as client:
         response = await client.post(
             "https://oauth2.googleapis.com/token",
@@ -289,7 +298,7 @@ async def exchange_google_code(code: str, state: str) -> Dict:
                 "code": code,
                 "client_id": GOOGLE_CLIENT_ID,
                 "client_secret": GOOGLE_CLIENT_SECRET,
-                "redirect_uri": GOOGLE_REDIRECT_URI,
+                "redirect_uri": redirect_uri,
                 "grant_type": "authorization_code",
             },
         )

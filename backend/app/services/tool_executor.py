@@ -23,22 +23,33 @@ class ToolExecutor:
             "googlecalendar": "int_gcal",
             "calendar": "int_gcal",
             "gcal": "int_gcal",
+            "event": "int_gcal",
             "gmail": "int_gmail",
             "email": "int_gmail",
             "whatsapp": "int_whatsapp",
             "googledrive": "int_gdrive",
             "drive": "int_gdrive",
+            "file": "int_gdrive",
             "hubspot": "int_hubspot",
             "crm": "int_hubspot",
+            "deal": "int_hubspot",
+            "contact": "int_hubspot",
             "razorpay": "int_razorpay",
+            "payment": "int_razorpay",
             "shopify": "int_shopify",
             "store": "int_shopify",
+            "order": "int_shopify",
+            "product": "int_shopify",
             "googlemeet": "int_gmeet",
             "meet": "int_gmeet",
             "slack": "int_slack",
+            "channel": "int_slack",
             "googlemaps": "int_google_maps",
             "maps": "int_google_maps",
+            "route": "int_google_maps",
+            "place": "int_google_maps",
             "elevenlabs": "int_elevenlabs",
+            "speech": "int_elevenlabs",
             "firebase": "int_fcm",
             "fcm": "int_fcm",
             "customapi": "int_rest_api",
@@ -46,8 +57,9 @@ class ToolExecutor:
         }
         
         integration_id = None
+        search_target = f"{tool_name_lower} {method_name.lower()}"
         for key, val in tool_to_id.items():
-            if key in tool_name_lower:
+            if key in search_target:
                 integration_id = val
                 break
                 

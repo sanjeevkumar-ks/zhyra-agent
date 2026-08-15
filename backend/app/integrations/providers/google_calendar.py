@@ -197,10 +197,22 @@ class GoogleCalendarProvider(BaseIntegrationProvider):
 
     async def _list_events(self, service, args: dict) -> list:
         import datetime
+        from dateutil import parser as dtparser
         calendar_id = args.get("calendar_id", "primary")
-        time_min = args.get("time_min", datetime.datetime.utcnow().isoformat() + "Z")
-        time_max = args.get("time_max", "")
+        
+        raw_min = args.get("time_min", args.get("start_time", ""))
+        raw_max = args.get("time_max", args.get("end_time", ""))
         max_results = int(args.get("max_results", 10))
+
+        if raw_min:
+            try:
+                time_min = dtparser.parse(raw_min).isoformat()
+                if not time_min.endswith("Z") and "+" not in time_min and "-" not in time_min[10:]:
+                    time_min += "Z"
+            except Exception:
+                time_min = datetime.datetime.utcnow().isoformat() + "Z"
+        else:
+            time_min = datetime.datetime.utcnow().isoformat() + "Z"
 
         params = {
             "calendarId": calendar_id,
@@ -209,39 +221,59 @@ class GoogleCalendarProvider(BaseIntegrationProvider):
             "singleEvents": True,
             "orderBy": "startTime",
         }
-        if time_max:
-            params["timeMax"] = time_max
+        if raw_max:
+            try:
+                time_max = dtparser.parse(raw_max).isoformat()
+                if not time_max.endswith("Z") and "+" not in time_max and "-" not in time_max[10:]:
+                    time_max += "Z"
+                params["timeMax"] = time_max
+            except Exception:
+                pass
 
         result = service.events().list(**params).execute()
         return result.get("items", [])
 
     async def _create_event(self, service, args: dict) -> dict:
         import datetime
+        from dateutil import parser as dtparser
         calendar_id = args.get("calendar_id", "primary")
-        summary = args.get("summary", args.get("title", "New Meeting"))
+        summary = args.get("summary", args.get("title", args.get("name", "New Meeting")))
         start = args.get("start_time", args.get("start", ""))
         end = args.get("end_time", args.get("end", ""))
         description = args.get("description", "")
         attendees = args.get("attendees", [])
         timezone = args.get("timezone", "UTC")
 
-        if not start:
-            now = datetime.datetime.utcnow()
-            start = now.isoformat() + "Z"
-            end = (now + datetime.timedelta(hours=1)).isoformat() + "Z"
-        if not end:
-            from dateutil import parser as dtparser
-            start_dt = dtparser.parse(start)
-            end = (start_dt + datetime.timedelta(minutes=30)).isoformat()
+        start_dt = None
+        if start:
+            try:
+                start_dt = dtparser.parse(start)
+            except Exception:
+                pass
+
+        if not start_dt:
+            start_dt = datetime.datetime.utcnow() + datetime.timedelta(days=1)
+            start_dt = start_dt.replace(hour=13, minute=0, second=0, microsecond=0)
+
+        end_dt = None
+        if end:
+            try:
+                end_dt = dtparser.parse(end)
+            except Exception:
+                pass
+        if not end_dt:
+            end_dt = start_dt + datetime.timedelta(minutes=30)
 
         event_body = {
             "summary": summary,
             "description": description,
-            "start": {"dateTime": start, "timeZone": timezone},
-            "end": {"dateTime": end, "timeZone": timezone},
+            "start": {"dateTime": start_dt.isoformat(), "timeZone": timezone},
+            "end": {"dateTime": end_dt.isoformat(), "timeZone": timezone},
         }
         if attendees:
-            event_body["attendees"] = [{"email": a} for a in attendees]
+            if isinstance(attendees, str):
+                attendees = [a.strip() for a in attendees.split(",") if a.strip()]
+            event_body["attendees"] = [{"email": a} for a in attendees if isinstance(a, str)]
 
         result = service.events().insert(calendarId=calendar_id, body=event_body).execute()
         return result

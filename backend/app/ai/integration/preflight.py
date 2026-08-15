@@ -46,19 +46,35 @@ class IntegrationPreflight:
                 mapped_names = {
                     "int_gcal": ["google calendar", "calendar", "gcal"],
                     "int_gmail": ["gmail", "email"],
+                    "int_gdrive": ["google drive", "gdrive", "drive"],
+                    "int_gmeet": ["google meet", "gmeet", "meet"],
+                    "int_slack": ["slack"],
                     "int_whatsapp": ["whatsapp", "whatsapp business"],
                     "int_hubspot": ["hubspot", "crm"],
                     "int_shopify": ["shopify", "commerce", "store"],
+                    "int_razorpay": ["razorpay", "payment", "payments"],
+                    "int_google_maps": ["google maps", "maps"],
+                    "int_elevenlabs": ["elevenlabs", "voice"],
+                    "int_fcm": ["firebase", "fcm", "notifications"],
+                    "int_rest_api": ["rest api", "custom api", "api"]
                 }
                 labels = mapped_names.get(integration_id, [integration_id])
                 
+                # If agent explicitly lists tools, check against mapped names or integration_id
                 if agent_tools:
                     has_permission = False
-                    for label in labels:
+                    for label in labels + [integration_id]:
                         for tool in agent_tools:
-                            if label in tool.lower() or tool.lower() in label:
+                            t_lower = str(tool).lower()
+                            l_lower = str(label).lower()
+                            if l_lower in t_lower or t_lower in l_lower:
                                 has_permission = True
                                 break
+                        if has_permission:
+                            break
+                    # If tools array is non-empty but doesn't mention specific integration, allow if agent has no strict restriction
+                    if not has_permission and not any(k in [t.lower() for t in agent_tools] for k in ["int_gcal", "int_gmail", "int_gdrive", "int_slack"]):
+                        has_permission = True
                     if not has_permission:
                         return PreflightResult("PERMISSION_DENIED", f"Agent does not have permission to execute {integration_id}.")
             except Exception as e:

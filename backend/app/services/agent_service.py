@@ -28,11 +28,11 @@ class AgentService:
                 aid = data.get("id")
                 baseline = 0
                 if "nova" in aid.lower():
-                    baseline = 412
+                    baseline = 0
                 elif "orion" in aid.lower():
-                    baseline = 187
+                    baseline = 0
                 elif "sage" in aid.lower():
-                    baseline = 63
+                    baseline = 0
                 data["conversations_today"] = baseline + convo_counts.get(aid, 0)
                 results.append(data)
         return results
@@ -60,11 +60,11 @@ class AgentService:
 
         baseline = 0
         if "nova" in agent_id.lower():
-            baseline = 412
+            baseline = 0
         elif "orion" in agent_id.lower():
-            baseline = 187
+            baseline = 0
         elif "sage" in agent_id.lower():
-            baseline = 63
+            baseline = 0
         data["conversations_today"] = baseline + count
         return data
 
@@ -188,9 +188,9 @@ class AgentService:
                 "status": "active",
                 "capabilities": ["Answers FAQs", "Handles refunds", "Escalates edge cases", "Sentiment aware"],
                 "channels": ["Web Chat", "WhatsApp", "Email"],
-                "conversations_today": 412,
-                "resolution_rate": 96,
-                "health": 98,
+                "conversations_today": 0,
+                "resolution_rate": 0,
+                "health": 0,
                 "personality": "Warm, concise, and endlessly patient.",
                 "role": "First line of support across every channel.",
                 "goals": ["Resolve 90%+ without escalation", "Keep CSAT above 4.7", "Respond within 8 seconds"],
@@ -213,9 +213,9 @@ class AgentService:
                 "status": "active",
                 "capabilities": ["Books appointments", "Reschedules", "Sends reminders", "Handles cancellations"],
                 "channels": ["Phone", "Web Chat", "SMS"],
-                "conversations_today": 187,
-                "resolution_rate": 94,
-                "health": 92,
+                "conversations_today": 0,
+                "resolution_rate": 0,
+                "health": 0,
                 "personality": "Friendly and efficient, never keeps people waiting.",
                 "role": "Manages the full booking lifecycle for the clinic team.",
                 "goals": ["Fill 95% of available slots", "Reduce no-shows by 20%"],
@@ -238,9 +238,9 @@ class AgentService:
                 "status": "training",
                 "capabilities": ["Summarizes documents", "Answers internal questions", "Cites sources"],
                 "channels": ["Slack", "Internal Portal"],
-                "conversations_today": 63,
-                "resolution_rate": 88,
-                "health": 74,
+                "conversations_today": 0,
+                "resolution_rate": 0,
+                "health": 0,
                 "personality": "Precise, thoughtful, cites everything.",
                 "role": "Internal knowledge assistant for the operations team.",
                 "goals": ["Reduce time-to-answer for internal queries", "Maintain source accuracy"],
