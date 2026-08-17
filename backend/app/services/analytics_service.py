@@ -1,166 +1,285 @@
+import time
+import uuid
+from typing import List, Optional, Dict, Any
 from app.database.firestore import firestore_client
 from app.utils.logger import log_info, log_error
-import time
 
 class AnalyticsService:
+
     @staticmethod
-    async def get_dashboard_analytics(workspace_id: str) -> dict:
-        """Retrieves and compiles workspace event metrics for dashboard plotting."""
-        # 1. Count actual agents
-        total_agents = 0
-        active_agents = 0
-        try:
-            agents_stream = firestore_client.collection("agents").stream()
-            workspace_agents = [a.to_dict() for a in agents_stream if a.to_dict().get("workspace_id") == workspace_id]
-            total_agents = len(workspace_agents)
-            active_agents = sum(1 for a in workspace_agents if a.get("status") == "active")
-        except Exception as e:
-            log_error("Failed to query agents for analytics", exc=e)
+    def record_event(
+        workspace_id: str,
+        event_type: str,
+        agent_id: Optional[str] = None,
+        conversation_id: Optional[str] = None,
+        tool_name: Optional[str] = None,
+        success: bool = True,
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> dict:
+        """Centralized analytics event recorder. Stores structured events in Firestore."""
+        event_id = f"evt_{uuid.uuid4().hex[:12]}"
+        now = time.time()
 
-        # 2. Count actual workflows
-        total_workflows = 0
-        try:
-            workflows_stream = firestore_client.collection("workflows").stream()
-            workspace_workflows = [w.to_dict() for w in workflows_stream if w.to_dict().get("workspace_id") == workspace_id]
-            total_workflows = len(workspace_workflows)
-        except Exception as e:
-            log_error("Failed to query workflows for analytics", exc=e)
+        event_doc = {
+            "id": event_id,
+            "workspace_id": workspace_id,
+            "event_type": event_type,
+            "agent_id": agent_id or "",
+            "conversation_id": conversation_id or "",
+            "tool_name": tool_name or "",
+            "success": success,
+            "metadata": metadata or {},
+            "created_at": now
+        }
 
-        # 3. Fetch conversations
-        workspace_convos = []
+        try:
+            firestore_client.collection("analytics_events").document(event_id).set(event_doc)
+            log_info(f"Analytics event recorded [{event_type}] for workspace {workspace_id}")
+        except Exception as e:
+            log_error(f"Failed to record analytics event for workspace {workspace_id}", exc=e)
+
+        return event_doc
+
+    @staticmethod
+    async def get_dashboard_analytics(workspace_id: str, range_key: str = "30d") -> dict:
+        """Calculates real workspace analytics strictly from recorded event and conversation data."""
+        now = time.time()
+        
+        # Calculate time cutoff based on range parameter
+        if range_key == "today":
+            cutoff = now - 86400
+            prev_cutoff = now - (86400 * 2)
+        elif range_key == "7d":
+            cutoff = now - (86400 * 7)
+            prev_cutoff = now - (86400 * 14)
+        elif range_key == "90d":
+            cutoff = now - (86400 * 90)
+            prev_cutoff = now - (86400 * 180)
+        else:  # Default 30d
+            cutoff = now - (86400 * 30)
+            prev_cutoff = now - (86400 * 60)
+
+        # 1. Fetch workspace analytics events
+        events_in_range = []
+        prev_events = []
+        try:
+            events_stream = firestore_client.collection("analytics_events").stream()
+            for doc in events_stream:
+                data = doc.to_dict()
+                if data.get("workspace_id") == workspace_id:
+                    created = data.get("created_at", 0)
+                    if created >= cutoff:
+                        events_in_range.append(data)
+                    elif prev_cutoff <= created < cutoff:
+                        prev_events.append(data)
+        except Exception as e:
+            log_error("Failed to query analytics_events from Firestore", exc=e)
+
+        # 2. Fetch workspace conversations
+        convos_in_range = []
+        prev_convos = []
         try:
             convos_stream = firestore_client.collection("conversations").stream()
-            workspace_convos = [c.to_dict() for c in convos_stream if c.to_dict().get("workspace_id") == workspace_id]
+            for doc in convos_stream:
+                data = doc.to_dict()
+                if data.get("workspace_id") == workspace_id:
+                    created = data.get("created_at") or data.get("updated_at") or 0
+                    if created >= cutoff:
+                        convos_in_range.append(data)
+                    elif prev_cutoff <= created < cutoff:
+                        prev_convos.append(data)
         except Exception as e:
-            log_error("Failed to query conversations for analytics", exc=e)
+            log_error("Failed to query conversations from Firestore", exc=e)
 
-        convo_count = len(workspace_convos)
-        convo_count_today = convo_count
+        # Total Conversations
+        total_convos = len(convos_in_range)
+        prev_total_convos = len(prev_convos)
 
-        # Calculate actual deflection rate (resolution_rate)
-        if convo_count > 0:
-            deflected = sum(1 for c in workspace_convos if c.get("status") not in ("paused", "escalated"))
-            resolution_rate = round((deflected / convo_count) * 100, 1)
+        # --- METRIC 1: Customer Satisfaction (CSAT) ---
+        feedback_events = [e for e in events_in_range if e.get("event_type") == "feedback_received"]
+        prev_feedback_events = [e for e in prev_events if e.get("event_type") == "feedback_received"]
+
+        if feedback_events:
+            csat_scores = [e.get("metadata", {}).get("rating", 5) for e in feedback_events if isinstance(e.get("metadata", {}).get("rating"), (int, float))]
+            csat = round(sum(csat_scores) / len(csat_scores), 1) if csat_scores else None
         else:
-            resolution_rate = 94.2
+            csat = None
 
-        # CSAT score (out of 5)
-        csat = 4.82
+        if prev_feedback_events:
+            prev_csat_scores = [e.get("metadata", {}).get("rating", 5) for e in prev_feedback_events if isinstance(e.get("metadata", {}).get("rating"), (int, float))]
+            prev_csat = round(sum(prev_csat_scores) / len(prev_csat_scores), 1) if prev_csat_scores else None
+        else:
+            prev_csat = None
 
-        # Volume Trend: build last 14 entries ending with today's count
-        volume_base = [120, 145, 130, 160, 185, 210, 190, 220, 240, 215, 230, 255, 240]
-        volume_trend = volume_base + [convo_count_today]
+        csat_change = round(csat - prev_csat, 1) if (csat is not None and prev_csat is not None) else None
 
-        # Summary Items reflecting real counts
-        summary_items = [
-            {"label": "Active AI Employees", "value": f"{active_agents} / {total_agents}" if total_agents > 0 else "0 / 0", "change": "+1 this week", "trend_up": True},
-            {"label": "Cost Saved (Est)", "value": f"${(convo_count_today * 31):,}", "change": "+14.2% vs last month", "trend_up": True},
-            {"label": "Deflection Rate", "value": f"{resolution_rate}%", "change": "+2.1% improvement", "trend_up": True},
-            {"label": "Average Handle Time", "value": "1m 14s", "change": "-18s vs last month", "trend_up": True}
+        # --- METRIC 2: Resolution Rate ---
+        if total_convos > 0:
+            resolved_convos = sum(1 for c in convos_in_range if c.get("status") in ("completed", "resolved"))
+            resolution_rate = round((resolved_convos / total_convos) * 100, 1)
+        else:
+            resolution_rate = None
+
+        if prev_total_convos > 0:
+            prev_resolved = sum(1 for c in prev_convos if c.get("status") in ("completed", "resolved"))
+            prev_resolution_rate = round((prev_resolved / prev_total_convos) * 100, 1)
+        else:
+            prev_resolution_rate = None
+
+        res_change = round(resolution_rate - prev_resolution_rate, 1) if (resolution_rate is not None and prev_resolution_rate is not None) else None
+
+        # --- METRIC 3: AI Confidence ---
+        confidence_events = [e for e in events_in_range if e.get("metadata", {}).get("confidence") is not None]
+        if confidence_events:
+            conf_scores = [float(e["metadata"]["confidence"]) for e in confidence_events]
+            ai_confidence = round(sum(conf_scores) / len(conf_scores), 1)
+        else:
+            ai_confidence = None
+
+        # --- METRIC 4: Escalation Rate ---
+        if total_convos > 0:
+            escalated_convos = sum(1 for c in convos_in_range if c.get("status") == "escalated" or c.get("escalated") is True)
+            escalation_rate = round((escalated_convos / total_convos) * 100, 1)
+        else:
+            escalation_rate = None
+
+        # --- METRIC 5: Automation Savings ---
+        successful_actions = sum(1 for e in events_in_range if e.get("event_type") == "tool_succeeded" or (e.get("event_type") == "tool_execution" and e.get("success") is True))
+        prev_successful_actions = sum(1 for e in prev_events if e.get("event_type") == "tool_succeeded" or (e.get("event_type") == "tool_execution" and e.get("success") is True))
+
+        if successful_actions > 0:
+            hours_saved = round((successful_actions * 5) / 60, 1)
+            cost_saved = int(hours_saved * 35)  # $35/hr estimated handling cost
+            fte_saved = round(successful_actions / 150, 1)  # 150 actions = 1 FTE
+        else:
+            hours_saved = 0
+            cost_saved = 0
+            fte_saved = 0
+
+        # --- METRIC 6: Top Questions ---
+        user_msgs = [e for e in events_in_range if e.get("event_type") == "user_message"]
+        question_counts: Dict[str, int] = {}
+        for m in user_msgs:
+            txt = m.get("metadata", {}).get("text", "").strip()
+            if txt and len(txt) > 3:
+                # Basic normalization
+                norm = txt.rstrip("?.!").strip().capitalize()
+                question_counts[norm] = question_counts.get(norm, 0) + 1
+
+        top_questions = [
+            {"q": q, "count": cnt}
+            for q, cnt in sorted(question_counts.items(), key=lambda x: x[1], reverse=True)[:5]
         ]
 
-        # Knowledge Freshness (e.g. 88% default, or higher if knowledge docs exist)
-        knowledge_count = 0
-        try:
-            docs_stream = firestore_client.collection("documents").stream()
-            knowledge_count = sum(1 for d in docs_stream if d.to_dict().get("workspace_id") == workspace_id)
-        except Exception:
-            pass
-        knowledge_freshness = 88 if knowledge_count == 0 else 98
+        # --- METRIC 7: Knowledge Gaps ---
+        gap_events = [e for e in events_in_range if e.get("event_type") == "knowledge_gap"]
+        gap_counts: Dict[str, int] = {}
+        for g in gap_events:
+            q = g.get("metadata", {}).get("question", "Unanswered query").strip()
+            gap_counts[q] = gap_counts.get(q, 0) + 1
+
+        knowledge_gaps = [
+            {"gap": q, "count": cnt}
+            for q, cnt in sorted(gap_counts.items(), key=lambda x: x[1], reverse=True)[:5]
+        ]
+
+        # --- METRIC 8: Failed Actions ---
+        failed_events = [e for e in events_in_range if e.get("event_type") == "tool_failed" or (e.get("event_type") == "tool_execution" and e.get("success") is False)]
+        failed_counts: Dict[str, Dict[str, Any]] = {}
+        for f in failed_events:
+            tool = f.get("tool_name") or f.get("metadata", {}).get("tool_name") or "Action"
+            agent_id = f.get("agent_id") or "Agent"
+            key = f"{tool}_{agent_id}"
+            if key not in failed_counts:
+                failed_counts[key] = {"name": tool, "agent": agent_id, "count": 0}
+            failed_counts[key]["count"] += 1
+
+        failed_actions = list(failed_counts.values())[:5]
+
+        # --- METRIC 9: Timeseries & Sparklines ---
+        # Generate date buckets for the selected range
+        days_count = 7 if range_key == "7d" else 90 if range_key == "90d" else 1 if range_key == "today" else 30
+        timeseries_series = []
+        for d in range(days_count - 1, -1, -1):
+            day_start = now - ((d + 1) * 86400)
+            day_end = now - (d * 86400)
+            day_label = time.strftime("%Y-%m-%d", time.gmtime(day_end))
+
+            day_convos = sum(1 for c in convos_in_range if day_start <= (c.get("created_at") or 0) < day_end)
+            day_resolved = sum(1 for c in convos_in_range if day_start <= (c.get("created_at") or 0) < day_end and c.get("status") in ("completed", "resolved"))
+            day_fails = sum(1 for e in events_in_range if day_start <= (e.get("created_at") or 0) < day_end and e.get("event_type") in ("tool_failed", "conversation_failed"))
+
+            timeseries_series.append({
+                "date": day_label,
+                "conversations": day_convos,
+                "resolved": day_resolved,
+                "failed_actions": day_fails
+            })
+
+        has_real_data = (total_convos > 0 or len(events_in_range) > 0)
 
         return {
-            "conversations_today": convo_count_today,
-            "resolution_rate": resolution_rate,
-            "avg_response_time": 4.8,
+            "range": range_key,
+            "has_real_data": has_real_data,
+            "conversations_total": total_convos,
+            "conversations_change": round(((total_convos - prev_total_convos) / prev_total_convos * 100), 1) if prev_total_convos > 0 else None,
             "csat": csat,
-            "knowledge_freshness": knowledge_freshness,
-            "volume_trend": volume_trend,
-            "csat_trend": [4.5, 4.6, 4.55, 4.7, 4.65, 4.8, 4.75, 4.82, 4.85, 4.8, 4.83, 4.88, 4.81, 4.82],
-            "summary_items": summary_items,
-            "has_real_data": True
+            "csat_change": csat_change,
+            "resolution_rate": resolution_rate,
+            "resolution_change": res_change,
+            "ai_confidence": ai_confidence,
+            "escalation_rate": escalation_rate,
+            "successful_actions": successful_actions,
+            "hours_saved": hours_saved,
+            "cost_saved": cost_saved,
+            "fte_saved": fte_saved,
+            "top_questions": top_questions,
+            "knowledge_gaps": knowledge_gaps,
+            "failed_actions": failed_actions,
+            "timeseries": timeseries_series,
         }
 
     @staticmethod
-    async def get_recent_activity(workspace_id: str) -> list:
-        """Compiles recent operational events for timeline feed."""
+    async def get_recent_activity(workspace_id: str) -> List[dict]:
+        """Compiles recent operational events strictly from actual events and docs."""
         activities = []
-
-        # 1. Fetch conversations
         try:
-            convos_stream = firestore_client.collection("conversations").stream()
-            convos = [c.to_dict() for c in convos_stream if c.to_dict().get("workspace_id") == workspace_id]
-            for c in sorted(convos, key=lambda x: x.get("time", ""), reverse=True)[:5]:
-                c_status = c.get("status", "active")
-                act_type = "handoff" if c_status == "paused" else "booking" if "book" in c.get("preview", "").lower() else "feedback"
-                
-                activities.append({
-                    "id": f"convo_{c['id']}",
-                    "type": act_type,
-                    "title": f"Chat with {c.get('customer', 'User')}",
-                    "detail": c.get("preview", "Conversation started"),
-                    "agent": c.get("agent_name", "Agent"),
-                    "time": c.get("time", "Just now")
-                })
-        except Exception as e:
-            log_error("Failed to query activities from conversations", exc=e)
+            events_stream = firestore_client.collection("analytics_events").stream()
+            events = [e.to_dict() for e in events_stream if e.to_dict().get("workspace_id") == workspace_id]
+            sorted_events = sorted(events, key=lambda x: x.get("created_at", 0), reverse=True)[:10]
 
-        # 2. Fetch knowledge documents
-        try:
-            docs_stream = firestore_client.collection("documents").stream()
-            docs = [d.to_dict() for d in docs_stream if d.to_dict().get("workspace_id") == workspace_id]
-            for d in sorted(docs, key=lambda x: x.get("updated_at", 0), reverse=True)[:3]:
-                activities.append({
-                    "id": f"doc_{d['id']}",
-                    "type": "knowledge",
-                    "title": "Knowledge updated",
-                    "detail": f"Document '{d.get('title')}' indexed",
-                    "time": "Updated recently"
-                })
-        except Exception as e:
-            log_error("Failed to query activities from documents", exc=e)
+            for ev in sorted_events:
+                e_type = ev.get("event_type", "")
+                created = ev.get("created_at", time.time())
+                time_str = time.strftime("%b %d, %H:%M", time.gmtime(created))
 
-        # 3. Fetch workflows
-        try:
-            wf_stream = firestore_client.collection("workflows").stream()
-            workflows = [w.to_dict() for w in wf_stream if w.to_dict().get("workspace_id") == workspace_id]
-            for w in workflows[:2]:
-                activities.append({
-                    "id": f"wf_{w['id']}",
-                    "type": "workflow",
-                    "title": "Workflow compiled",
-                    "detail": f"Workflow '{w.get('name')}' contains {len(w.get('nodes', []))} steps",
-                    "time": "Synced"
-                })
+                if "tool" in e_type:
+                    activities.append({
+                        "id": ev.get("id"),
+                        "type": "workflow",
+                        "title": f"Tool '{ev.get('tool_name', 'Action')}' executed",
+                        "detail": f"Status: {'Success' if ev.get('success') else 'Failed'}",
+                        "agent": ev.get("agent_id", "Agent"),
+                        "time": time_str
+                    })
+                elif "conversation" in e_type:
+                    activities.append({
+                        "id": ev.get("id"),
+                        "type": "booking",
+                        "title": f"Conversation {e_type.replace('_', ' ')}",
+                        "detail": f"Conversation {ev.get('conversation_id', '')}",
+                        "agent": ev.get("agent_id", "Agent"),
+                        "time": time_str
+                    })
+                elif "knowledge" in e_type:
+                    activities.append({
+                        "id": ev.get("id"),
+                        "type": "knowledge",
+                        "title": "Knowledge Query",
+                        "detail": ev.get("metadata", {}).get("question", "Search query"),
+                        "time": time_str
+                    })
         except Exception as e:
-            log_error("Failed to query activities from workflows", exc=e)
-
-        # Fallback if no activity found
-        if not activities:
-            activities = [
-                {
-                    "id": "act_1",
-                    "type": "booking",
-                    "title": "Orion booked an appointment",
-                    "detail": "Maria Chen — Dermatology consult, Thu 2:30pm",
-                    "agent": "Orion",
-                    "time": "2m ago"
-                },
-                {
-                    "id": "act_2",
-                    "type": "knowledge",
-                    "title": "Knowledge updated",
-                    "detail": "Refund Policy v3 indexed — 214 chunks re-embedded",
-                    "time": "11m ago"
-                },
-                {
-                    "id": "act_3",
-                    "type": "workflow",
-                    "title": "Workflow executed",
-                    "detail": "\"VIP Escalation\" triggered for order #88213",
-                    "agent": "Nova",
-                    "time": "24m ago"
-                }
-            ]
+            log_error(f"Failed to query recent activity for workspace {workspace_id}", exc=e)
 
         return activities
-

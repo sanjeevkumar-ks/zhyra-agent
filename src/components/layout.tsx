@@ -29,6 +29,7 @@ import { appRoute } from "../lib/routes";
 import { Avatar, Badge } from "./ui";
 import { useAuthStore } from "../store/useAuthStore";
 import { apiClient } from "../lib/apiClient";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 
 const nav = [
   { to: appRoute(""), label: "Workspace", icon: LayoutGrid, end: true },
@@ -49,12 +50,6 @@ const createItems = [
   { label: "New Workflow", to: appRoute("/workflows") },
   { label: "Add Knowledge", to: appRoute("/knowledge") },
   { label: "Voice Studio", to: appRoute("/voice-studio") },
-];
-
-const notifications: string[] = [
-  "Nova resolved 12 conversations in the last hour.",
-  "New integration webhook connected successfully.",
-  "System health check completed with 0 errors.",
 ];
 
 
@@ -208,7 +203,7 @@ export function Sidebar({
   );
 }
 
-export function Topbar({ onSearch, title }: { onSearch: () => void; title: string }) {
+export function Topbar({ onSearch, title, onToggleSidebar }: { onSearch: () => void; title?: string; onToggleSidebar?: () => void }) {
   const [notifOpen, setNotifOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
@@ -237,112 +232,156 @@ export function Topbar({ onSearch, title }: { onSearch: () => void; title: strin
         .toUpperCase()
         .slice(0, 2)
     : "PS";
+    
+  const queryClient = useQueryClient();
+  const { data: notifications = [] } = useQuery<any[]>({
+    queryKey: ["notifications"],
+    queryFn: () => apiClient.get<any[]>("/api/notifications"),
+    refetchInterval: 15000,
+  });
+
+  const unreadCount = notifications.filter((n: any) => !n.read).length;
+
+  const markReadMutation = useMutation({
+    mutationFn: () => apiClient.post("/api/notifications/read", {}),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["notifications"] }),
+  });
+
+  const handleToggleNotif = () => {
+    if (!notifOpen && unreadCount > 0) {
+      markReadMutation.mutate();
+    }
+    setNotifOpen((v) => !v);
+  };
 
   return (
-    <header className="sticky top-0 z-30 flex h-14 md:h-16 shrink-0 items-center justify-between gap-2 md:gap-4 border-b border-line/70 bg-canvas/80 px-3 md:px-6 backdrop-blur-md">
-  {/* Title */}
-  <p className="text-[14px] md:text-[15px] font-medium text-ink-soft shrink-0">{title}</p>
-
-  {/* Search — hidden on small screens, visible md+ */}
-  <div className="hidden md:flex flex-1 items-center justify-center">
-    <button
-      onClick={onSearch}
-      className="flex w-full max-w-md items-center gap-2.5 rounded-full border border-line bg-surface px-4 py-2 text-[13px] text-ink-faint shadow-soft transition-all hover:border-ink/15"
-    >
-      <Sparkles size={14} className="text-violet" />
-      <span className="flex-1 text-left">Ask Zhyra anything, or create something…</span>
-      <kbd className="rounded-md border border-line bg-canvas-alt px-1.5 py-0.5 text-[10px]">⌘K</kbd>
-    </button>
-  </div>
-
-  <div ref={ref} className="flex items-center gap-1 md:gap-2">
-    {/* Mobile search icon */}
-    <button
-      onClick={onSearch}
-      className="flex md:hidden h-9 w-9 items-center justify-center rounded-full text-ink-soft transition-colors hover:bg-canvas-alt hover:text-ink"
-    >
-      <Sparkles size={16} strokeWidth={1.8} />
-    </button>
-
-    {/* Create */}
-    <div className="relative">
+    <header className="sticky top-0 z-30 flex h-14 items-center justify-between border-b border-line bg-canvas/85 px-4 md:px-6 backdrop-blur-md">
+      {/* Mobile Hamburger Button */}
       <button
-        onClick={() => setCreateOpen((v) => !v)}
-        className="inline-flex items-center gap-1.5 rounded-full bg-ink px-3 md:px-3.5 py-2 text-[13px] font-medium text-white shadow-soft transition-transform hover:-translate-y-px active:scale-[0.97]"
+        onClick={onToggleSidebar}
+        className="flex md:hidden h-9 w-9 items-center justify-center rounded-lg text-ink-soft hover:bg-canvas-alt hover:text-ink transition-colors"
       >
-        <Plus size={14} />
-        <span className="hidden sm:inline">Create</span>
+        <ChevronsRight size={18} />
       </button>
 
-      <AnimatePresence>
-        {createOpen && (
-          <motion.div
-            initial={{ opacity: 0, y: 6, scale: 0.98 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 6, scale: 0.98 }}
-            transition={{ duration: 0.15 }}
-            className="absolute right-0 top-11 w-56 rounded-xl border border-line bg-surface p-1.5 shadow-soft-lg"
+      {/* Search — hidden on small screens, visible md+ */}
+      <div className="hidden md:flex flex-1 items-center justify-center">
+        <button
+          onClick={onSearch}
+          className="flex w-full max-w-md items-center gap-2.5 rounded-full border border-line bg-surface px-4 py-2 text-[13px] text-ink-faint shadow-soft transition-all hover:border-ink/15"
+        >
+          <Sparkles size={14} className="text-violet" />
+          <span className="flex-1 text-left">Ask Zhyra anything, or create something…</span>
+          <kbd className="rounded-md border border-line bg-canvas-alt px-1.5 py-0.5 text-[10px]">⌘K</kbd>
+        </button>
+      </div>
+
+      <div ref={ref} className="flex items-center gap-1 md:gap-2">
+        {/* Mobile search icon */}
+        <button
+          onClick={onSearch}
+          className="flex md:hidden h-9 w-9 items-center justify-center rounded-full text-ink-soft transition-colors hover:bg-canvas-alt hover:text-ink"
+        >
+          <Sparkles size={16} strokeWidth={1.8} />
+        </button>
+
+        {/* Create */}
+        <div className="relative">
+          <button
+            onClick={() => setCreateOpen((v) => !v)}
+            className="inline-flex items-center gap-1.5 rounded-full bg-ink px-3 md:px-3.5 py-2 text-[13px] font-medium text-white shadow-soft transition-transform hover:-translate-y-px active:scale-[0.97]"
           >
-            {createItems.map((item) => (
-              <button
-                key={item.label}
-                onClick={() => {
-                  navigate(item.to);
-                  setCreateOpen(false);
-                }}
-                className="flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-left text-[13px] text-ink hover:bg-canvas-alt"
+            <Plus size={14} />
+            <span className="hidden sm:inline">Create</span>
+          </button>
+
+          <AnimatePresence>
+            {createOpen && (
+              <motion.div
+                initial={{ opacity: 0, y: 6, scale: 0.98 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: 6, scale: 0.98 }}
+                transition={{ duration: 0.15 }}
+                className="absolute right-0 top-11 w-56 rounded-xl border border-line bg-surface p-1.5 shadow-soft-lg"
               >
-                {item.label}
-                <ArrowRight size={13} className="text-ink-faint" />
-              </button>
-            ))}
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </div>
-
-    {/* Notifications */}
-    <div className="relative">
-      <button
-        onClick={() => setNotifOpen((v) => !v)}
-        className="relative flex h-9 w-9 items-center justify-center rounded-full text-ink-soft transition-colors hover:bg-canvas-alt hover:text-ink"
-      >
-        <Bell size={17} strokeWidth={1.8} />
-        {notifications.length > 0 && (
-          <span className="absolute right-2 top-2 h-1.5 w-1.5 rounded-full bg-accent" />
-        )}
-      </button>
-
-      <AnimatePresence>
-        {notifOpen && (
-          <motion.div
-            initial={{ opacity: 0, y: 6, scale: 0.98 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 6, scale: 0.98 }}
-            transition={{ duration: 0.15 }}
-            className="absolute right-0 top-11 w-[calc(100vw-24px)] sm:w-80 rounded-xl border border-line bg-surface p-2 shadow-soft-lg"
-          >
-            <p className="px-2 py-1.5 text-xs font-semibold uppercase tracking-wide text-ink-faint">
-              Zhyra Summary
-            </p>
-            {notifications.length === 0 ? (
-              <p className="px-2 py-3 text-center text-[13px] text-ink-faint">
-                No new notifications
-              </p>
-            ) : (
-              notifications.map((n, i) => (
-                <div
-                  key={i}
-                  className="rounded-lg px-2 py-2 text-[13px] leading-snug text-ink-soft hover:bg-canvas-alt"
-                >
-                  {n}
-                </div>
-              ))
+                {createItems.map((item) => (
+                  <button
+                    key={item.label}
+                    onClick={() => {
+                      setCreateOpen(false);
+                      navigate(item.to);
+                    }}
+                    className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-[13px] font-medium text-ink-soft hover:bg-canvas-alt hover:text-ink transition-colors"
+                  >
+                    {item.label}
+                    <ArrowRight size={13} className="text-ink-faint" />
+                  </button>
+                ))}
+              </motion.div>
             )}
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </div>
+          </AnimatePresence>
+        </div>
+
+        {/* Notifications */}
+        <div className="relative">
+          <button
+            onClick={handleToggleNotif}
+            className="relative flex h-9 w-9 items-center justify-center rounded-full text-ink-soft transition-colors hover:bg-canvas-alt hover:text-ink"
+          >
+            <Bell size={17} strokeWidth={1.8} />
+            {unreadCount > 0 && (
+              <span className="absolute right-1 top-1 flex h-4 w-4 items-center justify-center rounded-full bg-rose text-[9px] font-bold text-white">
+                {unreadCount}
+              </span>
+            )}
+          </button>
+
+          <AnimatePresence>
+            {notifOpen && (
+              <motion.div
+                initial={{ opacity: 0, y: 6, scale: 0.98 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: 6, scale: 0.98 }}
+                transition={{ duration: 0.15 }}
+                className="absolute right-0 top-11 w-[calc(100vw-24px)] sm:w-80 rounded-xl border border-line bg-surface p-2 shadow-soft-lg"
+              >
+                <div className="flex items-center justify-between px-2 py-1.5 border-b border-line mb-1">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-ink-faint">
+                    Notifications ({notifications.length})
+                  </p>
+                  {unreadCount > 0 && (
+                    <button
+                      onClick={() => markReadMutation.mutate()}
+                      className="text-[11px] text-accent hover:underline"
+                    >
+                      Mark all read
+                    </button>
+                  )}
+                </div>
+                {notifications.length === 0 ? (
+                  <p className="px-2 py-4 text-center text-[13px] text-ink-faint">
+                    No new notifications
+                  </p>
+                ) : (
+                  <div className="max-h-64 overflow-y-auto space-y-1">
+                    {notifications.map((n: any) => (
+                      <div
+                        key={n.id || n.title}
+                        className={cn(
+                          "rounded-lg px-2.5 py-2 text-[12.5px] leading-snug transition-colors",
+                          !n.read ? "bg-canvas-alt/70 font-medium text-ink" : "text-ink-soft hover:bg-canvas-alt"
+                        )}
+                      >
+                        <p className="font-semibold text-[13px] text-ink">{n.title}</p>
+                        <p className="text-[12px] text-ink-soft mt-0.5">{n.message}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
 
     {/* Profile */}
     <div className="relative">

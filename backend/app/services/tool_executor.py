@@ -91,21 +91,96 @@ class ToolExecutor:
         # 1. Run Preflight Validation Check
         from app.ai.integration.preflight import IntegrationPreflight
         from app.ai.integration.normalizer import ToolResultNormalizer
+        from app.services.analytics_service import AnalyticsService
+        from app.services.notification_service import NotificationService
         
+        AnalyticsService.record_event(
+            workspace_id=workspace_id,
+            event_type="tool_started",
+            agent_id=agent_id,
+            tool_name=tool_key
+        )
+
         preflight = await IntegrationPreflight.check(workspace_id, agent_id, integration_id)
         if preflight.status != "READY":
             log_info(f"[INTEGRATION] Preflight check status: {preflight.status} message={preflight.message}")
-            return ToolResultNormalizer.normalize_error(
+            err_res = ToolResultNormalizer.normalize_error(
                 tool_name, resolved_method, preflight.status, preflight.message
             )
+            AnalyticsService.record_event(
+                workspace_id=workspace_id,
+                event_type="tool_failed",
+                agent_id=agent_id,
+                tool_name=tool_key,
+                success=False,
+                metadata={"error": preflight.message}
+            )
+            NotificationService.create_notification(
+                workspace_id=workspace_id,
+                type="tool_failed",
+                title=f"Tool Action Failed — {tool_name}",
+                message=f"Action '{resolved_method}' failed for agent {agent_id}: {preflight.message}",
+                severity="error",
+                entity_type="tool",
+                entity_id=tool_key
+            )
+            return err_res
             
         # 2. Execute provider capability
-        from app.services.integration_service import IntegrationService
-        provider = IntegrationService._get_provider(integration_id)
-        res = await provider.execute(workspace_id, resolved_method, args)
-        
-        log_info(f"[AGENT] Tool result returned")
+        try:
+            from app.services.integration_service import IntegrationService
+            provider = IntegrationService._get_provider(integration_id)
+            res = await provider.execute(workspace_id, resolved_method, args)
+            
+            log_info(f"[AGENT] Tool result returned")
+            
+            if isinstance(res, str) and res.startswith("Error:"):
+                AnalyticsService.record_event(
+                    workspace_id=workspace_id,
+                    event_type="tool_failed",
+                    agent_id=agent_id,
+                    tool_name=tool_key,
+                    success=False,
+                    metadata={"error": res}
+                )
+                NotificationService.create_notification(
+                    workspace_id=workspace_id,
+                    type="tool_failed",
+                    title=f"Tool Failure — {tool_name}",
+                    message=f"Execution failed for {resolved_method}: {res[:150]}",
+                    severity="error",
+                    entity_type="tool",
+                    entity_id=tool_key
+                )
+            else:
+                AnalyticsService.record_event(
+                    workspace_id=workspace_id,
+                    event_type="tool_succeeded",
+                    agent_id=agent_id,
+                    tool_name=tool_key,
+                    success=True
+                )
 
-        if isinstance(res, dict):
-            return res
-        return ToolResultNormalizer.normalize_response(tool_name, resolved_method, res)
+            if isinstance(res, dict):
+                return res
+            return ToolResultNormalizer.normalize_response(tool_name, resolved_method, res)
+        except Exception as e:
+            log_error(f"Tool execution error for {tool_key}", exc=e)
+            AnalyticsService.record_event(
+                workspace_id=workspace_id,
+                event_type="tool_failed",
+                agent_id=agent_id,
+                tool_name=tool_key,
+                success=False,
+                metadata={"error": str(e)}
+            )
+            NotificationService.create_notification(
+                workspace_id=workspace_id,
+                type="tool_failed",
+                title=f"Tool Exception — {tool_name}",
+                message=f"Unexpected error executing {resolved_method}: {str(e)}",
+                severity="error",
+                entity_type="tool",
+                entity_id=tool_key
+            )
+            return ToolResultNormalizer.normalize_error(tool_name, resolved_method, "EXECUTION_ERROR", str(e))

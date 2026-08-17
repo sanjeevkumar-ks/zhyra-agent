@@ -1,16 +1,28 @@
-from fastapi import APIRouter, Depends
-from app.middleware.auth import get_current_user, AuthUser
+from fastapi import APIRouter, Depends, Query
+from app.middleware.auth import get_current_user
 from app.api.workspaces import get_user_workspace_id
 from app.services.analytics_service import AnalyticsService
-from app.schemas.analytics import DashboardAnalyticsResponse
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 router = APIRouter()
 
-@router.get("/dashboard", response_model=DashboardAnalyticsResponse)
-async def get_dashboard_analytics(workspace_id: str = Depends(get_user_workspace_id)):
-    """Compiles deflection rates, average response delays, and trend charts."""
-    return await AnalyticsService.get_dashboard_analytics(workspace_id)
+@router.get("/overview")
+@router.get("/dashboard")
+async def get_analytics_overview(
+    range: str = Query("30d"),
+    workspace_id: str = Depends(get_user_workspace_id)
+):
+    """Returns workspace-scoped real analytics overview and time-range metric comparisons."""
+    return await AnalyticsService.get_dashboard_analytics(workspace_id, range_key=range)
+
+@router.get("/timeseries")
+async def get_analytics_timeseries(
+    range: str = Query("30d"),
+    workspace_id: str = Depends(get_user_workspace_id)
+):
+    """Returns real date-bucketed analytics timeseries for chart rendering."""
+    res = await AnalyticsService.get_dashboard_analytics(workspace_id, range_key=range)
+    return {"range": range, "timeseries": res.get("timeseries", [])}
 
 @router.get("/activity", response_model=List[Dict[str, Any]])
 async def get_activity_timeline(workspace_id: str = Depends(get_user_workspace_id)):

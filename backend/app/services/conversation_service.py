@@ -114,13 +114,17 @@ class ConversationService:
         
         convo_ref.update(updates)
         
+        agent_id = convo_data.get("agent_id")
+
         # Increments analytics events count in db
-        cls._log_analytics_event(workspace_id, "message_sent")
+        if sender_type == "customer":
+            cls._log_analytics_event(workspace_id, "user_message", agent_id=agent_id, conversation_id=convo_id, metadata={"text": text})
+        else:
+            cls._log_analytics_event(workspace_id, "agent_message", agent_id=agent_id, conversation_id=convo_id, metadata={"text": text})
         
         # 2. If message is from customer, trigger AI Response flow
         if sender_type == "customer":
             # Start background agent reply task
-            agent_id = convo_data.get("agent_id")
             ai_reply = await cls._generate_agent_reply(workspace_id, agent_id, text, messages, convo_id)
             
             # Save AI's response message
@@ -134,6 +138,8 @@ class ConversationService:
                 "time": time.strftime("%H:%M")
             }
             messages.append(ai_message)
+            
+            cls._log_analytics_event(workspace_id, "agent_message", agent_id=agent_id, conversation_id=convo_id, metadata={"text": ai_reply["text"]})
             
             # Update database status
             convo_ref.update({
@@ -549,13 +555,15 @@ class ConversationService:
             log_error("Failed to increment agent conversation count", exc=e)
 
     @staticmethod
-    def _log_analytics_event(workspace_id: str, event_type: str):
+    def _log_analytics_event(workspace_id: str, event_type: str, agent_id: str = None, conversation_id: str = None, metadata: dict = None):
         try:
-            # Appends basic usage telemetry in Firestore
-            ref = firestore_client.collection("events").add({
-                "workspace_id": workspace_id,
-                "event_type": event_type,
-                "timestamp": time.time()
-            })
+            from app.services.analytics_service import AnalyticsService
+            AnalyticsService.record_event(
+                workspace_id=workspace_id,
+                event_type=event_type,
+                agent_id=agent_id,
+                conversation_id=conversation_id,
+                metadata=metadata
+            )
         except Exception as e:
             log_error("Failed to log analytics event", exc=e)

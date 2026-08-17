@@ -132,21 +132,32 @@ class VoiceService:
             )
 
         session_id = f"vses_{uuid.uuid4().hex[:12]}"
-        expires_at = time.time() + 3600  # 1 hour
-
+        now = time.time()
         session_data = {
             "session_id": session_id,
             "workspace_id": workspace_id,
             "agent_id": agent_id,
             "voice_id": voice_id,
-            "provider": "elevenlabs",
-            "expires_at": expires_at,
-            "created_at": time.time(),
-            "status": "active"
+            "agent_name": agent.get("name", "AI Agent"),
+            "status": "active",
+            "created_at": now,
+            "expires_at": now + 3600
         }
 
+        # Cache session in memory
         ACTIVE_VOICE_SESSIONS[session_id] = session_data
-        
+
+        try:
+            from app.services.analytics_service import AnalyticsService
+            AnalyticsService.record_event(
+                workspace_id=workspace_id,
+                event_type="voice_session_started",
+                agent_id=agent_id,
+                metadata={"session_id": session_id, "voice_id": voice_id}
+            )
+        except Exception:
+            pass
+
         # Also store session record in Firestore
         firestore_client.collection("voice_sessions").document(session_id).set(session_data)
 

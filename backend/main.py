@@ -13,7 +13,7 @@ from app.middleware.auth import is_bypass_auth
 from app.api import (
     auth, users, workspaces, agents, conversations,
     knowledge, voice, settings, providers, integrations,
-    billing, analytics, memory, team, workflows, context
+    billing, analytics, memory, team, workflows, context, notifications
 )
 
 app = FastAPI(
@@ -81,6 +81,7 @@ app.include_router(analytics.router, prefix="/api/analytics", tags=["Analytics"]
 app.include_router(memory.router, prefix="/api/memory", tags=["AI Memory"])
 app.include_router(team.router, prefix="/api/team", tags=["Team"])
 app.include_router(context.router, prefix="/api/context", tags=["Context Optimization"])
+app.include_router(notifications.router, prefix="/api/notifications", tags=["Notifications"])
 
 @app.get("/", tags=["Health"])
 @app.get("/health", tags=["Health"])
