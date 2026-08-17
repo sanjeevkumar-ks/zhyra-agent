@@ -13,7 +13,7 @@ from app.middleware.auth import is_bypass_auth
 from app.api import (
     auth, users, workspaces, agents, conversations,
     knowledge, voice, settings, providers, integrations,
-    billing, analytics, memory, team, workflows, context, notifications
+    billing, analytics, memory, team, workflows, context, notifications, widget
 )
 
 app = FastAPI(
@@ -24,7 +24,7 @@ app = FastAPI(
     redoc_url="/redoc",
 )
 
-# CORS configuration — allow Firebase Hosting + local dev
+# CORS configuration — allow Firebase Hosting + local dev + dynamic widget origins
 _frontend_url = os.getenv("FRONTEND_BASE_URL", "http://localhost:5173")
 _allowed_origins = [
     "http://localhost:5173",
@@ -38,25 +38,32 @@ if _frontend_url and _frontend_url not in _allowed_origins:
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=_allowed_origins,
+    allow_origin_regex=r"https?://.*",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Custom middleware to track request durations
+# Custom middleware to track request durations & inject CORS for widget routes
 @app.middleware("http")
 async def add_process_time_header(request: Request, call_next):
     start_time = time.time()
     response = await call_next(request)
     process_time = time.time() - start_time
     response.headers["X-Process-Time"] = str(process_time)
+    
+    # Ensure widget API responses carry request origin for CORS
+    if request.url.path.startswith("/api/widget"):
+        req_origin = request.headers.get("origin")
+        if req_origin:
+            response.headers["Access-Control-Allow-Origin"] = req_origin
+            response.headers["Access-Control-Allow-Credentials"] = "true"
+
     return response
 
 # Exception handling
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
-    # Log the detailed exception here
     import traceback
     traceback.print_exc()
     return JSONResponse(
@@ -82,6 +89,7 @@ app.include_router(memory.router, prefix="/api/memory", tags=["AI Memory"])
 app.include_router(team.router, prefix="/api/team", tags=["Team"])
 app.include_router(context.router, prefix="/api/context", tags=["Context Optimization"])
 app.include_router(notifications.router, prefix="/api/notifications", tags=["Notifications"])
+app.include_router(widget.router, prefix="/api/widget", tags=["Embeddable Widget"])
 
 @app.get("/", tags=["Health"])
 @app.get("/health", tags=["Health"])
