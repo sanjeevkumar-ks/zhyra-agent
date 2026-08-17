@@ -70,9 +70,22 @@ async def test_integration_credentials(
 ):
     """Tests connection credentials against the provider API before connecting."""
     try:
+        from app.integrations.credential_store import load_credentials
         provider = IntegrationService._get_provider(integration_id)
         config = payload.configuration or {}
         credentials = payload.credentials or {}
+        
+        # Load stored credentials if no API key is supplied in the request body
+        raw_key = (
+            config.get("api_key")
+            or credentials.get("api_key")
+            or credentials.get("key")
+        )
+        if not raw_key:
+            stored = load_credentials(workspace_id, integration_id)
+            if stored and stored.get("api_key"):
+                credentials = {"api_key": stored.get("api_key")}
+                
         is_valid = await provider.validate(config, credentials)
         if integration_id == "int_elevenlabs" and isinstance(is_valid, dict):
             return is_valid
