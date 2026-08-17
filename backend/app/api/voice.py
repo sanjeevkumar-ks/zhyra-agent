@@ -69,10 +69,27 @@ async def create_voice_session(
     workspace_id: str = Depends(get_user_workspace_id)
 ):
     """Creates a realtime voice session token for an authorized agent."""
+    log_info(f"[VOICE_SESSION_REQUEST] workspace_id={workspace_id}")
+    log_info("[AUTH_SUCCESS] Firebase ID token validated successfully.")
+    
     agent_id = payload.get("agent_id")
     if not agent_id:
+        log_error("[SESSION_ERROR] Missing agent_id in request payload.")
         raise HTTPException(status_code=400, detail="agent_id is required")
-    return await VoiceService.create_session(workspace_id, agent_id)
+        
+    try:
+        session_data = await VoiceService.create_session(workspace_id, agent_id)
+        log_info(f"[AGENT_VALIDATION_SUCCESS] agent_id={agent_id}")
+        log_info(f"[ELEVENLABS_VALIDATION] voice_id={session_data.get('voice_id')}")
+        log_info(f"[SESSION_TOKEN_CREATED] session_id={session_data.get('session_id')}")
+        log_info("[SESSION_RESPONSE_SENT] Session initialized successfully.")
+        return session_data
+    except HTTPException as e:
+        log_error(f"[SESSION_ERROR] Status {e.status_code}: {e.detail}")
+        raise
+    except Exception as e:
+        log_error(f"[SESSION_ERROR] {str(e)}", exc=e)
+        raise HTTPException(status_code=500, detail=f"Failed to initialize voice session: {str(e)}")
 
 @router.websocket("/ws/{session_id}")
 async def voice_websocket_endpoint(websocket: WebSocket, session_id: str):
@@ -80,11 +97,14 @@ async def voice_websocket_endpoint(websocket: WebSocket, session_id: str):
     Realtime WebSocket transport for streaming speech-to-text, agent reasoning,
     tool execution, and ElevenLabs text-to-speech audio chunks.
     """
+    log_info(f"[VOICE_WEBSOCKET_CONNECT_ATTEMPT] session_id={session_id}")
     await websocket.accept()
+    log_info(f"[VOICE_WEBSOCKET_ACCEPTED] session_id={session_id}")
     
     try:
         session = VoiceService.get_session(session_id)
     except HTTPException as e:
+        log_error(f"[SESSION_ERROR] Session lookup failed for {session_id}: {e.detail}")
         await websocket.send_json({
             "event": "provider_error",
             "error": {"code": "VOICE_SESSION_EXPIRED", "message": str(e.detail)}
@@ -103,6 +123,7 @@ async def voice_websocket_endpoint(websocket: WebSocket, session_id: str):
         if not api_key:
             raise Exception("ElevenLabs API Key missing")
     except Exception as e:
+        log_error(f"[SESSION_ERROR] ElevenLabs auth failed for workspace {workspace_id}: {str(e)}")
         await websocket.send_json({
             "event": "provider_error",
             "error": {"code": "VOICE_PROVIDER_AUTH_FAILED", "message": "ElevenLabs credentials unavailable."}
@@ -119,6 +140,7 @@ async def voice_websocket_endpoint(websocket: WebSocket, session_id: str):
         "agent_id": agent_id,
         "voice_id": voice_id
     })
+    log_info(f"[VOICE_SESSION_STARTED] Realtime session active for session_id={session_id}")
 
     provider = ElevenLabsProvider()
 

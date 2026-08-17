@@ -83,6 +83,9 @@ export const RealtimeVoiceModal: React.FC<RealtimeVoiceModalProps> = ({
   const transcriptEndRef = useRef<HTMLDivElement | null>(null);
   const [audioLevel, setAudioLevel] = useState<number>(0);
 
+  const isUserEndingRef = useRef(false);
+  const isInitializedRef = useRef(false);
+
   // Voice name label
   const voiceName =
     agent.voice_config?.voice_name?.split("-")[0]?.trim() ||
@@ -94,9 +97,19 @@ export const RealtimeVoiceModal: React.FC<RealtimeVoiceModalProps> = ({
     transcriptEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [transcript, activeActions]);
 
-  // Session Duration Timer
+  // Session Duration Timer (Starts ONLY when connected/listening, NOT during connecting or error)
   useEffect(() => {
-    if (sessionState === "ENDED" || !sessionStartTime) return;
+    const isSessionActive = [
+      "CONNECTED",
+      "LISTENING",
+      "USER_SPEAKING",
+      "THINKING",
+      "TOOL_EXECUTION",
+      "AGENT_SPEAKING",
+    ].includes(sessionState);
+
+    if (!isSessionActive || !sessionStartTime) return;
+
     const interval = setInterval(() => {
       const elapsedSec = Math.floor((Date.now() - sessionStartTime) / 1000);
       const mins = Math.floor(elapsedSec / 60)
@@ -105,23 +118,30 @@ export const RealtimeVoiceModal: React.FC<RealtimeVoiceModalProps> = ({
       const secs = (elapsedSec % 60).toString().padStart(2, "0");
       setSessionDuration(`${mins}:${secs}`);
     }, 1000);
+
     return () => clearInterval(interval);
   }, [sessionStartTime, sessionState]);
 
   // Start Realtime Session on Mount
   useEffect(() => {
-    if (!isOpen || !wsUrl) return;
+    if (!isOpen || !wsUrl || isInitializedRef.current) return;
+    isInitializedRef.current = true;
+    isUserEndingRef.current = false;
 
-    setSessionStartTime(Date.now());
+    console.log("[VOICE_CONNECTION_START] Connecting to WebSocket:", wsUrl);
     setSessionState("CONNECTING");
     setErrorMessage(null);
     setTranscript([]);
+    setActionCount(0);
+    setSessionDuration("00:00");
 
     // 1. Establish WebSocket Connection
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
 
     ws.onopen = () => {
+      console.log("[VOICE_CONNECTION_ESTABLISHED] WebSocket open.");
+      setSessionStartTime(Date.now());
       setSessionState("LISTENING");
       // Trigger initial agent greeting prompt
       ws.send(JSON.stringify({ event: "init_greeting" }));
@@ -132,26 +152,31 @@ export const RealtimeVoiceModal: React.FC<RealtimeVoiceModalProps> = ({
     ws.onmessage = (event) => {
       try {
         const msg = JSON.parse(event.data);
+        console.log("[VOICE_EVENT]", msg.event);
         handleServerEvent(msg);
       } catch (err) {
-        console.error("Failed to parse WebSocket message", err);
+        console.error("[VOICE_ERROR] Failed to parse WebSocket message", err);
       }
     };
 
     ws.onerror = (err) => {
-      console.error("WebSocket connection error", err);
+      console.error("[VOICE_ERROR] WebSocket connection error", err);
       setSessionState("ERROR");
-      setErrorMessage("Realtime audio connection error.");
+      setErrorMessage("Unable to establish voice connection. Please try again.");
     };
 
-    ws.onclose = () => {
-      if (sessionState !== "ENDED") {
+    ws.onclose = (e) => {
+      console.log("[VOICE_CONNECTION_CLOSED] Code:", e.code, "Reason:", e.reason);
+      if (isUserEndingRef.current) {
         setSessionState("ENDED");
+      } else if (sessionState !== "ENDED") {
+        setSessionState("ERROR");
+        setErrorMessage("Voice stream connection closed unexpectedly.");
       }
     };
 
     return () => {
-      cleanupSession();
+      // Don't auto-teardown unless unmounting modal completely
     };
   }, [isOpen, wsUrl]);
 
@@ -160,6 +185,7 @@ export const RealtimeVoiceModal: React.FC<RealtimeVoiceModalProps> = ({
     const event = msg.event;
 
     if (event === "session_started") {
+      console.log("[VOICE_SESSION_STARTED] Realtime session active:", msg.session_id);
       setSessionState("LISTENING");
     } else if (event === "user_started_speaking") {
       setSessionState("USER_SPEAKING");
@@ -184,13 +210,13 @@ export const RealtimeVoiceModal: React.FC<RealtimeVoiceModalProps> = ({
       setSessionState("TOOL_EXECUTION");
       const actions = msg.actions || ["Processing requested action"];
       setActiveActions(actions);
-      setActionCount((prev) => prev + actions.length);
     } else if (event === "tool_execution_completed") {
       setSessionState("THINKING");
       const actions = msg.actions || [];
       if (actions.length > 0) {
         setLastActionStatus(actions[0]);
-        setTimeout(() => setLastActionStatus(null), 3000);
+        setActionCount((prev) => prev + actions.length);
+        setTimeout(() => setLastActionStatus(null), 3500);
       }
       setActiveActions([]);
     } else if (event === "agent_started_speaking") {
@@ -214,6 +240,7 @@ export const RealtimeVoiceModal: React.FC<RealtimeVoiceModalProps> = ({
     } else if (event === "agent_finished_speaking") {
       setSessionState("LISTENING");
     } else if (event === "provider_error" || event === "tool_error") {
+      console.error("[VOICE_ERROR]", msg.error);
       setSessionState("ERROR");
       setErrorMessage(msg.error?.message || "Voice session error occurred.");
     } else if (event === "session_ended") {
@@ -394,6 +421,7 @@ export const RealtimeVoiceModal: React.FC<RealtimeVoiceModalProps> = ({
 
   // End Conversation
   const handleEndSession = () => {
+    isUserEndingRef.current = true;
     setSessionState("ENDED");
     cleanupSession();
   };

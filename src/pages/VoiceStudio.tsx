@@ -252,13 +252,19 @@ export default function VoiceStudio() {
 
     // 4. Request session token from backend
     setIsInitializing(true);
+    console.log("[VOICE_START_CLICKED] Agent selected:", sessionAgentId);
+    console.log("[VOICE_SESSION_REQUEST_STARTED] Requesting session token from backend...");
+
     try {
       const sess = await apiClient.post<{ session_id: string }>("/api/voice/session", {
         agent_id: sessionAgentId,
       });
 
-      const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-      const wsUrl = `${protocol}//${window.location.host}/api/voice/ws/${sess.session_id}`;
+      console.log("[VOICE_SESSION_RESPONSE] Received session_id:", sess.session_id);
+
+      const apiBase = import.meta.env.VITE_API_URL || window.location.origin;
+      const wsBase = apiBase.replace(/^http/, "ws");
+      const wsUrl = `${wsBase}/api/voice/ws/${sess.session_id}`;
 
       setActiveSession({
         sessionId: sess.session_id,
@@ -267,7 +273,7 @@ export default function VoiceStudio() {
       });
       setIsModalOpen(true);
     } catch (e: any) {
-      console.error("Failed to start voice session", e);
+      console.error("[VOICE_ERROR] Failed to start voice session", e);
       setValidationError(e.message || "Failed to create voice session token.");
     } finally {
       setIsInitializing(false);
