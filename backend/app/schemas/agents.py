@@ -8,6 +8,12 @@ class AgentOverride(BaseModel):
     system_prompt: Optional[str] = None
     response_style: Optional[str] = None
 
+class VoiceConfig(BaseModel):
+    enabled: bool = False
+    provider: Optional[str] = "elevenlabs"
+    voice_id: Optional[str] = None
+    voice_name: Optional[str] = None
+
 class AgentBase(BaseModel):
     name: str
     purpose: str
@@ -22,6 +28,7 @@ class AgentBase(BaseModel):
     tools: List[str] = Field(default_factory=list)
     knowledge_sources: List[str] = Field(default_factory=list)
     voice_id: Optional[str] = None
+    voice_config: Optional[VoiceConfig] = None
     workflow_id: Optional[str] = None
     
     # Overrides
@@ -45,6 +52,7 @@ class AgentUpdate(BaseModel):
     knowledge_sources: Optional[List[str]] = None
     overrides: Optional[AgentOverride] = None
     voice_id: Optional[str] = None
+    voice_config: Optional[VoiceConfig] = None
     workflow_id: Optional[str] = None
 
 class AgentResponse(AgentBase):
