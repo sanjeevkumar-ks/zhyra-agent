@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, Query, Request, HTTPException
 from fastapi.responses import RedirectResponse, JSONResponse
 from app.middleware.auth import get_current_user, AuthUser
 from app.api.workspaces import get_user_workspace_id
@@ -54,6 +54,8 @@ async def connect_integration(
             payload=payload.model_dump()
         )
     except HTTPException as e:
+        if isinstance(e.detail, dict):
+            return JSONResponse(status_code=e.status_code, content=e.detail)
         return JSONResponse(status_code=e.status_code, content={"detail": e.detail})
     except Exception as e:
         from app.utils.logger import log_error
@@ -72,8 +74,12 @@ async def test_integration_credentials(
         config = payload.configuration or {}
         credentials = payload.credentials or {}
         is_valid = await provider.validate(config, credentials)
+        if integration_id == "int_elevenlabs" and isinstance(is_valid, dict):
+            return is_valid
         return {"success": True, "valid": is_valid, "message": "Credentials verified successfully."}
     except HTTPException as e:
+        if isinstance(e.detail, dict):
+            return JSONResponse(status_code=e.status_code, content=e.detail)
         return JSONResponse(status_code=e.status_code, content={"success": False, "detail": e.detail})
     except Exception as e:
         from app.utils.logger import log_error
@@ -93,6 +99,23 @@ async def disconnect_integration(
         from app.utils.logger import log_error
         log_error(f"Failed to disconnect integration {integration_id}", exc=e)
         return JSONResponse(status_code=500, content={"detail": f"Failed to disconnect integration: {str(e)}"})
+
+@router.get("/int_elevenlabs/env_check")
+async def check_vercel_env_vars():
+    """Safely checks configured status of Vercel environment variables."""
+    keys = [
+        "FIREBASE_PROJECT_ID",
+        "FIREBASE_CLIENT_EMAIL",
+        "FIREBASE_PRIVATE_KEY",
+        "FIREBASE_CREDENTIALS_JSON",
+        "ENCRYPTION_KEY",
+        "FIREBASE_BYPASS_AUTH"
+    ]
+    result = {}
+    for k in keys:
+        val = os.getenv(k)
+        result[k] = "PRESENT" if (val and val.strip()) else "MISSING"
+    return result
 
 @router.get("/{integration_id}/health", response_model=IntegrationHealthResponse)
 async def verify_integration_health(

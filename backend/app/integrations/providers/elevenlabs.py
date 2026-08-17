@@ -37,44 +37,100 @@ class ElevenLabsProvider(BaseIntegrationProvider):
             raise HTTPException(status_code=500, detail="elevenlabs package not installed. Run: pip install elevenlabs")
 
     async def connect(self, workspace_id: str, payload: dict) -> dict:
-        config = payload.get("configuration", {})
-        credentials = payload.get("credentials", {})
+        import json
+        log_info(json.dumps({"event": "ELEVENLABS_CONNECT_START"}))
+
+        config = payload.get("configuration") or {}
+        credentials = payload.get("credentials") or {}
 
         raw_key = (
             config.get("api_key")
             or credentials.get("api_key")
             or credentials.get("key")
-            or ""
         )
+
+        api_key_present = raw_key is not None
+        api_key_length = len(raw_key) if isinstance(raw_key, str) else 0
+        api_key_type = type(raw_key).__name__
+        log_info(
+            f"[ELEVENLABS_CONNECT_FORMAT_CHECK] api_key_present = {str(api_key_present).lower()}, "
+            f"api_key_length = {api_key_length}, "
+            f"api_key_type = {api_key_type}"
+        )
+
+        if not raw_key or not isinstance(raw_key, str):
+            log_info(json.dumps({"event": "ELEVENLABS_CONNECT_FAILURE", "reason": "Missing or invalid api_key type"}))
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "success": False,
+                    "error": {
+                        "code": "INVALID_API_KEY",
+                        "message": "The ElevenLabs API key is missing or invalid type."
+                    }
+                }
+            )
+
         api_key = str(raw_key).strip().strip('"').strip("'")
-
         if not api_key:
-            raise HTTPException(status_code=400, detail="ElevenLabs API Key is required.")
+            log_info(json.dumps({"event": "ELEVENLABS_CONNECT_FAILURE", "reason": "Empty api_key"}))
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "success": False,
+                    "error": {
+                        "code": "INVALID_API_KEY",
+                        "message": "The ElevenLabs API key is empty."
+                    }
+                }
+            )
 
-        # Validate API key against ElevenLabs user endpoint
-        await self.validate(config, {"api_key": api_key})
+        try:
+            # Validate API key against ElevenLabs user endpoint
+            account_info = await self.validate(config, {"api_key": api_key})
 
-        # Store encrypted credentials
-        save_credentials(workspace_id, self.INTEGRATION_ID, {"api_key": api_key})
+            # Store encrypted credentials
+            save_credentials(workspace_id, self.INTEGRATION_ID, {"api_key": api_key})
 
-        conn_acct = payload.get("connected_account")
-        if not conn_acct or conn_acct == "Not connected yet":
-            conn_acct = "ElevenLabs API Key"
+            conn_acct = payload.get("connected_account")
+            if not conn_acct or conn_acct == "Not connected yet":
+                conn_acct = "ElevenLabs API Key"
 
-        doc_ref = firestore_client.collection("integrations").document(f"{workspace_id}_{self.INTEGRATION_ID}")
-        integration_data = {
-            "id": self.INTEGRATION_ID,
-            "workspace_id": workspace_id,
-            "connected": True,
-            "synced_agents": payload.get("synced_agents", []),
-            "last_sync": "Just now",
-            "health": 100,
-            "config": {},  # Never store raw API key in public config
-            "connected_account": conn_acct,
-        }
-        doc_ref.set(integration_data, merge=True)
-        log_info(f"ElevenLabs connected successfully for workspace {workspace_id}")
-        return integration_data
+            doc_ref = firestore_client.collection("integrations").document(f"{workspace_id}_{self.INTEGRATION_ID}")
+            integration_data = {
+                "id": self.INTEGRATION_ID,
+                "workspace_id": workspace_id,
+                "connected": True,
+                "synced_agents": payload.get("synced_agents") or [],
+                "last_sync": "Just now",
+                "health": 100,
+                "config": {},  # Never store raw API key in public config
+                "connected_account": conn_acct,
+                "status": "connected",
+                "metadata": {
+                    "provider_user_id": account_info.get("account", {}).get("user_id"),
+                    "subscription_tier": account_info.get("account", {}).get("subscription_tier"),
+                    "voice_limit": account_info.get("account", {}).get("voice_limit")
+                }
+            }
+            doc_ref.set(integration_data, merge=True)
+            log_info(json.dumps({"event": "ELEVENLABS_CONNECT_SUCCESS"}))
+            return integration_data
+        except HTTPException as e:
+            log_info(json.dumps({"event": "ELEVENLABS_CONNECT_FAILURE", "reason": f"HTTPException {e.status_code}"}))
+            raise
+        except Exception as e:
+            log_info(json.dumps({"event": "ELEVENLABS_CONNECT_FAILURE", "reason": str(e)}))
+            raise HTTPException(
+                status_code=500,
+                detail={
+                    "success": False,
+                    "error": {
+                        "code": "SERVER_ERROR",
+                        "message": f"Connection failed: {str(e)}"
+                    }
+                }
+            )
 
     async def disconnect(self, workspace_id: str) -> None:
         delete_credentials(workspace_id, self.INTEGRATION_ID)
@@ -82,43 +138,163 @@ class ElevenLabsProvider(BaseIntegrationProvider):
         doc_ref.delete()
         log_info(f"ElevenLabs disconnected for workspace {workspace_id}")
 
-    async def validate(self, config: dict, credentials: dict) -> bool:
-        raw_key = credentials.get("api_key", config.get("api_key", ""))
+    async def validate(self, config: dict, credentials: dict) -> dict:
+        import json
+        log_info(json.dumps({"event": "ELEVENLABS_TEST_START"}))
+
+        raw_key = credentials.get("api_key", config.get("api_key"))
+
+        api_key_present = raw_key is not None
+        api_key_length = len(raw_key) if isinstance(raw_key, str) else 0
+        api_key_type = type(raw_key).__name__
+        log_info(
+            f"[ELEVENLABS_TEST_FORMAT_CHECK] api_key_present = {str(api_key_present).lower()}, "
+            f"api_key_length = {api_key_length}, "
+            f"api_key_type = {api_key_type}"
+        )
+
+        if not raw_key or not isinstance(raw_key, str):
+            log_info(json.dumps({"event": "ELEVENLABS_API_RESPONSE", "status_code": 400, "reason": "Missing or invalid api_key type"}))
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "success": False,
+                    "error": {
+                        "code": "INVALID_API_KEY",
+                        "message": "The ElevenLabs API key is missing or invalid type."
+                    }
+                }
+            )
+
         api_key = str(raw_key).strip().strip('"').strip("'")
         if not api_key:
-            raise HTTPException(status_code=400, detail="ElevenLabs API Key is required.")
+            log_info(json.dumps({"event": "ELEVENLABS_API_RESPONSE", "status_code": 400, "reason": "Empty api_key"}))
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "success": False,
+                    "error": {
+                        "code": "INVALID_API_KEY",
+                        "message": "The ElevenLabs API key is empty."
+                    }
+                }
+            )
 
         import httpx
+        log_info(json.dumps({"event": "ELEVENLABS_API_REQUEST", "request": "/v1/user"}))
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
                 r = await client.get(
                     "https://api.elevenlabs.io/v1/user",
                     headers={"xi-api-key": api_key},
                 )
+                log_info(json.dumps({"event": "ELEVENLABS_API_RESPONSE", "status_code": r.status_code, "request": "/v1/user"}))
+                
                 if r.status_code == 401:
                     raise HTTPException(
-                        status_code=400,
-                        detail="Invalid ElevenLabs API Key. Please double check your key from the ElevenLabs dashboard (Profile > API Keys)."
+                        status_code=401,
+                        detail={
+                            "success": False,
+                            "error": {
+                                "code": "INVALID_API_KEY",
+                                "message": "The ElevenLabs API key is invalid or expired."
+                            }
+                        }
                     )
-                if r.status_code not in (200, 201):
-                    detail_msg = f"ElevenLabs API returned status {r.status_code}"
-                    try:
-                        err_json = r.json()
-                        if "detail" in err_json:
-                            detail_msg = err_json["detail"].get("message") or str(err_json["detail"])
-                    except Exception:
-                        detail_msg = r.text[:150]
-                    raise HTTPException(status_code=400, detail=f"ElevenLabs key validation failed: {detail_msg}")
-            return True
+                elif r.status_code == 403:
+                    raise HTTPException(
+                        status_code=403,
+                        detail={
+                            "success": False,
+                            "error": {
+                                "code": "INSUFFICIENT_PERMISSIONS",
+                                "message": "The ElevenLabs API key does not have permission for this operation."
+                            }
+                        }
+                    )
+                elif r.status_code == 429:
+                    raise HTTPException(
+                        status_code=429,
+                        detail={
+                            "success": False,
+                            "error": {
+                                "code": "RATE_LIMITED",
+                                "message": "ElevenLabs rate limit reached. Try again shortly."
+                            }
+                        }
+                    )
+                elif r.status_code >= 500:
+                    raise HTTPException(
+                        status_code=r.status_code,
+                        detail={
+                            "success": False,
+                            "error": {
+                                "code": "SERVER_ERROR",
+                                "message": f"ElevenLabs is temporarily unavailable (Status code: {r.status_code})."
+                            }
+                        }
+                    )
+                elif r.status_code not in (200, 201):
+                    raise HTTPException(
+                        status_code=r.status_code,
+                        detail={
+                            "success": False,
+                            "error": {
+                                "code": "VALIDATION_FAILED",
+                                "message": f"ElevenLabs validation failed: {r.text[:150]}"
+                            }
+                        }
+                    )
+                
+                user_data = r.json()
+                return {
+                    "success": True,
+                    "provider": "elevenlabs",
+                    "status": "connected",
+                    "account": {
+                        "user_id": user_data.get("user_id", ""),
+                        "subscription_tier": user_data.get("subscription", {}).get("tier", "unknown"),
+                        "voice_limit": user_data.get("subscription", {}).get("voice_limit", 0)
+                    }
+                }
         except HTTPException:
             raise
         except httpx.ConnectError:
-            raise HTTPException(status_code=400, detail="Could not reach ElevenLabs server. Please check your internet connection.")
+            log_info(json.dumps({"event": "ELEVENLABS_API_RESPONSE", "error": "ConnectError"}))
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "success": False,
+                    "error": {
+                        "code": "CONNECTION_FAILED",
+                        "message": "Could not reach ElevenLabs server. Please check your internet connection."
+                    }
+                }
+            )
         except httpx.TimeoutException:
-            raise HTTPException(status_code=400, detail="ElevenLabs API request timed out. Please try again.")
+            log_info(json.dumps({"event": "ELEVENLABS_API_RESPONSE", "error": "TimeoutException"}))
+            raise HTTPException(
+                status_code=504,
+                detail={
+                    "success": False,
+                    "error": {
+                        "code": "TIMEOUT",
+                        "message": "ElevenLabs API request timed out. Please try again."
+                    }
+                }
+            )
         except Exception as e:
-            log_error("ElevenLabs validation error", exc=e)
-            raise HTTPException(status_code=400, detail=f"ElevenLabs API key verification failed: {str(e)}")
+            log_info(json.dumps({"event": "ELEVENLABS_API_RESPONSE", "error": str(e)}))
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "success": False,
+                    "error": {
+                        "code": "SERVER_ERROR",
+                        "message": f"ElevenLabs API key verification failed: {str(e)}"
+                    }
+                }
+            )
 
     async def refresh(self, workspace_id: str) -> dict:
         # API keys don't expire

@@ -121,7 +121,7 @@ class IntegrationService:
         provider = IntegrationService._get_provider(integration_id)
         integration_data = await provider.connect(workspace_id, payload)
         
-        synced_agents = payload.get("synced_agents", [])
+        synced_agents = payload.get("synced_agents") or []
         
         # Sync tools back to agents
         try:
@@ -156,7 +156,7 @@ class IntegrationService:
                         agent_name = adata.get("name")
                         
                         should_have_tool = (agent_id in synced_agents) or (agent_name in synced_agents)
-                        tools = adata.get("tools", [])
+                        tools = adata.get("tools") or []
                         has_tool = (int_name in tools) or (integration_id in tools)
                         
                         new_tools = list(tools)
