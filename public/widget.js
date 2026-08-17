@@ -23,13 +23,10 @@
     return;
   }
 
-  // 2. Resolve Production / Local Development Backend Origin
-  const isLocalHost =
-    window.location.hostname === "localhost" ||
-    window.location.hostname === "127.0.0.1";
-  
-  const API_BASE = isLocalHost
-    ? "http://localhost:8000/api/widget"
+  // 2. Resolve Production / Custom Backend Origin
+  const customApiBase = script.dataset.apiBase;
+  const API_BASE = customApiBase
+    ? customApiBase.replace(/\/$/, "")
     : "https://zhyra-agent.vercel.app/api/widget";
 
   // State Variables
