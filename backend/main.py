@@ -24,52 +24,80 @@ app = FastAPI(
     redoc_url="/redoc",
 )
 
-# CORS configuration — allow Firebase Hosting + local dev + dynamic widget origins
+# CORS configuration — allow Firebase Hosting + local dev origins + environment overrides
 _frontend_url = os.getenv("FRONTEND_BASE_URL", "http://localhost:5173")
+_env_origins = os.getenv("CORS_ALLOWED_ORIGINS", "").split(",")
+
 _allowed_origins = [
     "http://localhost:5173",
     "http://localhost:3000",
+    "http://localhost:5500",
+    "http://127.0.0.1:5173",
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:5500",
     "https://zhyra.web.app",
     "https://zhyra-e0d80.web.app",
     "https://zhyra-e0d80.firebaseapp.com",
 ]
-if _frontend_url and _frontend_url not in _allowed_origins:
-    _allowed_origins.append(_frontend_url)
+
+for orig in [_frontend_url] + _env_origins:
+    o_clean = orig.strip()
+    if o_clean and o_clean not in _allowed_origins:
+        _allowed_origins.append(o_clean)
 
 app.add_middleware(
     CORSMiddleware,
+    allow_origins=_allowed_origins,
     allow_origin_regex=r"https?://.*",
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     allow_headers=["*"],
+    expose_headers=["*"],
+    max_age=86400,
 )
 
-# Custom middleware to track request durations & inject CORS for widget routes
+# Custom middleware to track request durations & guarantee CORS headers on ALL responses
 @app.middleware("http")
 async def add_process_time_header(request: Request, call_next):
     start_time = time.time()
-    response = await call_next(request)
+    try:
+        response = await call_next(request)
+    except Exception as exc:
+        import traceback
+        traceback.print_exc()
+        req_origin = request.headers.get("origin") or "*"
+        response = JSONResponse(
+            status_code=500,
+            content={"detail": "Internal Server Error", "error": str(exc)},
+        )
+        response.headers["Access-Control-Allow-Origin"] = req_origin
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+        return response
+
     process_time = time.time() - start_time
     response.headers["X-Process-Time"] = str(process_time)
-    
-    # Ensure widget API responses carry request origin for CORS
-    if request.url.path.startswith("/api/widget"):
-        req_origin = request.headers.get("origin")
-        if req_origin:
-            response.headers["Access-Control-Allow-Origin"] = req_origin
-            response.headers["Access-Control-Allow-Credentials"] = "true"
+
+    # Guarantee CORS headers on widget & API responses for all status codes
+    req_origin = request.headers.get("origin")
+    if req_origin:
+        response.headers["Access-Control-Allow-Origin"] = req_origin
+        response.headers["Access-Control-Allow-Credentials"] = "true"
 
     return response
 
-# Exception handling
+# Exception handling — guarantee CORS headers on error responses
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     import traceback
     traceback.print_exc()
-    return JSONResponse(
+    req_origin = request.headers.get("origin") or "*"
+    res = JSONResponse(
         status_code=500,
         content={"detail": "Internal Server Error", "error": str(exc)},
     )
+    res.headers["Access-Control-Allow-Origin"] = req_origin
+    res.headers["Access-Control-Allow-Credentials"] = "true"
+    return res
 
 # Register routers
 app.include_router(auth.router, prefix="/api/auth", tags=["Authentication"])

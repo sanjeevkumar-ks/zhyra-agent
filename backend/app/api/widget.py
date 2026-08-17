@@ -1,7 +1,7 @@
 import time
 import uuid
 from typing import Optional, List, Dict, Any
-from fastapi import APIRouter, HTTPException, Header, Request, Response, status
+from google.cloud.firestore import ArrayUnion
 from app.database.firestore import firestore_client
 from app.utils.logger import log_info, log_error
 from app.ai.runtime.agent_runtime import AgentRuntime
@@ -172,6 +172,7 @@ async def create_widget_session(payload: dict, request: Request, response: Respo
     }
 
 @router.post("/message")
+@router.post("/chat")
 async def send_widget_message(
     payload: dict,
     request: Request,
@@ -235,7 +236,7 @@ async def send_widget_message(
     }
     try:
         convo_ref.update({
-            "messages": firestore_client.ArrayUnion([user_msg_doc]),
+            "messages": ArrayUnion([user_msg_doc]),
             "preview": user_text[:60],
             "updated_at": time.time()
         })
@@ -274,7 +275,7 @@ async def send_widget_message(
             "time": time.strftime("%H:%M")
         }
         convo_ref.update({
-            "messages": firestore_client.ArrayUnion([agent_msg_doc]),
+            "messages": ArrayUnion([agent_msg_doc]),
             "preview": reply_text[:60],
             "updated_at": time.time()
         })
