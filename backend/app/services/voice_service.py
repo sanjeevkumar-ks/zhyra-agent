@@ -121,7 +121,8 @@ class VoiceService:
             raise HTTPException(status_code=403, detail="Unauthorized access to agent.")
 
         voice_config = agent.get("voice_config") or {}
-        voice_enabled = voice_config.get("enabled", False)
+        # If enabled is not explicitly set, default to True if a voice_id is present
+        voice_enabled = voice_config.get("enabled", True if agent.get("voice_id") else False)
         voice_id = voice_config.get("voice_id") or agent.get("voice_id")
 
         if not voice_enabled or not voice_id:
