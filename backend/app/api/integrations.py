@@ -53,6 +53,8 @@ async def connect_integration(
             integration_id=integration_id,
             payload=payload.model_dump()
         )
+    except HTTPException as e:
+        return JSONResponse(status_code=e.status_code, content={"detail": e.detail})
     except Exception as e:
         from app.utils.logger import log_error
         log_error(f"Failed to connect integration {integration_id}", exc=e)

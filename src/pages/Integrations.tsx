@@ -302,8 +302,14 @@ export default function Integrations() {
         return;
       }
       queryClient.invalidateQueries({ queryKey: ["integrations"] });
+      queryClient.invalidateQueries({ queryKey: ["voice-status"] });
+      queryClient.invalidateQueries({ queryKey: ["voices"] });
       const selectedAgentCount = variables.payload.synced_agents?.length ?? 0;
-      setToast(selectedAgentCount ? "Integration saved and assigned" : "Integration saved");
+      setToast(selectedAgentCount ? "Integration saved and assigned" : "Integration connected successfully");
+      setOauthState("idle");
+    },
+    onError: (err: any) => {
+      setToast(err?.detail || err?.message || "Failed to connect integration");
       setOauthState("idle");
     },
   });
@@ -947,7 +953,8 @@ function inferConnectedAccount(
   for (const candidate of candidates) {
     if (typeof candidate === "string" && candidate.trim()) return candidate;
   }
-  return integrationName === "REST API" ? "Custom API connection" : "";
+  if (integrationName === "ElevenLabs") return "ElevenLabs API Key";
+  return integrationName === "REST API" ? "Custom API connection" : "Connected Account";
 }
 
 function matchesAssignedAgent(agent: ApiAgent, syncedAgents: string[]) {

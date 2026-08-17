@@ -40,20 +40,26 @@ class ElevenLabsProvider(BaseIntegrationProvider):
         config = payload.get("configuration", {})
         credentials = payload.get("credentials", {})
 
-        api_key = (
+        raw_key = (
             config.get("api_key")
             or credentials.get("api_key")
             or credentials.get("key")
+            or ""
         )
+        api_key = str(raw_key).strip().strip('"').strip("'")
 
         if not api_key:
             raise HTTPException(status_code=400, detail="ElevenLabs API Key is required.")
 
-        # Validate API key
-        account_info = await self.validate(config, {"api_key": api_key})
+        # Validate API key against ElevenLabs user endpoint
+        await self.validate(config, {"api_key": api_key})
 
-        # Store encrypted
+        # Store encrypted credentials
         save_credentials(workspace_id, self.INTEGRATION_ID, {"api_key": api_key})
+
+        conn_acct = payload.get("connected_account")
+        if not conn_acct or conn_acct == "Not connected yet":
+            conn_acct = "ElevenLabs API Key"
 
         doc_ref = firestore_client.collection("integrations").document(f"{workspace_id}_{self.INTEGRATION_ID}")
         integration_data = {
@@ -63,11 +69,11 @@ class ElevenLabsProvider(BaseIntegrationProvider):
             "synced_agents": payload.get("synced_agents", []),
             "last_sync": "Just now",
             "health": 100,
-            "config": {},  # Never store API key in config
-            "connected_account": payload.get("connected_account") or "ElevenLabs Account",
+            "config": {},  # Never store raw API key in public config
+            "connected_account": conn_acct,
         }
         doc_ref.set(integration_data, merge=True)
-        log_info(f"ElevenLabs connected for workspace {workspace_id}")
+        log_info(f"ElevenLabs connected successfully for workspace {workspace_id}")
         return integration_data
 
     async def disconnect(self, workspace_id: str) -> None:
@@ -77,7 +83,8 @@ class ElevenLabsProvider(BaseIntegrationProvider):
         log_info(f"ElevenLabs disconnected for workspace {workspace_id}")
 
     async def validate(self, config: dict, credentials: dict) -> bool:
-        api_key = credentials.get("api_key", config.get("api_key", ""))
+        raw_key = credentials.get("api_key", config.get("api_key", ""))
+        api_key = str(raw_key).strip().strip('"').strip("'")
         if not api_key:
             raise HTTPException(status_code=400, detail="ElevenLabs API Key is required.")
 
@@ -89,7 +96,7 @@ class ElevenLabsProvider(BaseIntegrationProvider):
                     headers={"xi-api-key": api_key},
                 )
                 if r.status_code == 401:
-                    raise HTTPException(status_code=400, detail="Invalid ElevenLabs API Key.")
+                    raise HTTPException(status_code=400, detail="Invalid ElevenLabs API Key. Please verify your API key from ElevenLabs dashboard.")
                 if r.status_code not in (200, 201):
                     raise HTTPException(status_code=400, detail=f"ElevenLabs validation failed: {r.text[:200]}")
             return True
