@@ -25,6 +25,7 @@ import { apiClient } from "../lib/apiClient";
 import { appRoute } from "../lib/routes";
 import { Badge, Button, EmptyState, PageHeader, Panel } from "../components/ui";
 import { cn } from "../utils/cn";
+import { RealtimeVoiceModal, AgentInfo } from "../components/RealtimeVoiceModal";
 
 interface Voice {
   id: string;
@@ -83,26 +84,16 @@ export default function VoiceStudio() {
   const [selectedAgentId, setSelectedAgentId] = useState("");
   const [assignSuccess, setAssignSuccess] = useState(false);
 
-  // Realtime Voice Session state
+  // Realtime Voice Session & Modal state
   const [sessionAgentId, setSessionAgentId] = useState("");
-  const [sessionActive, setSessionActive] = useState(false);
-  const [sessionState, setSessionState] = useState<"IDLE" | "CONNECTED" | "LISTENING" | "THINKING" | "TOOL_EXECUTION" | "SPEAKING" | "ERROR">("IDLE");
-  const [sessionEvents, setSessionEvents] = useState<string[]>([]);
-  const [userSpeechInput, setUserSpeechInput] = useState("");
-  const [activeActions, setActiveActions] = useState<string[]>([]);
-  const wsRef = useRef<WebSocket | null>(null);
-
-  // Cleanup audio playback on unmount
-  useEffect(() => {
-    return () => {
-      if (audioRef.current) {
-        audioRef.current.pause();
-      }
-      if (wsRef.current) {
-        wsRef.current.close();
-      }
-    };
-  }, []);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [activeSession, setActiveSession] = useState<{
+    sessionId: string;
+    wsUrl: string;
+    agent: AgentInfo;
+  } | null>(null);
+  const [validationError, setValidationError] = useState<string | null>(null);
+  const [isInitializing, setIsInitializing] = useState(false);
 
   // Filter voices
   const filteredVoices = useMemo(() => {
@@ -226,96 +217,61 @@ export default function VoiceStudio() {
     },
   });
 
-  // Realtime Session Execution
+  // Pre-session validation & token request
   const startRealtimeSession = async () => {
-    if (!sessionAgentId) return;
+    setValidationError(null);
 
+    // 1. Validate ElevenLabs connection
+    if (!isConnected) {
+      setValidationError("Connect ElevenLabs to use realtime voice.");
+      return;
+    }
+
+    // 2. Validate selected agent
+    if (!sessionAgentId) {
+      setValidationError("Select an agent before starting a voice session.");
+      return;
+    }
+
+    const targetAgent = agents.find((a: any) => a.id === sessionAgentId);
+    if (!targetAgent) {
+      setValidationError("Selected agent not found.");
+      return;
+    }
+
+    // 3. Validate agent voice configuration
+    const hasVoice =
+      targetAgent.voice_config?.enabled ||
+      !!targetAgent.voice_config?.voice_id ||
+      !!targetAgent.voice_id;
+
+    if (!hasVoice) {
+      setValidationError("Select a voice for this agent before starting a voice session.");
+      return;
+    }
+
+    // 4. Request session token from backend
+    setIsInitializing(true);
     try {
-      setSessionEvents(["Initializing session with backend..."]);
-      setSessionState("CONNECTING" as any);
-
       const sess = await apiClient.post<{ session_id: string }>("/api/voice/session", {
         agent_id: sessionAgentId,
       });
 
       const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
       const wsUrl = `${protocol}//${window.location.host}/api/voice/ws/${sess.session_id}`;
-      const ws = new WebSocket(wsUrl);
-      wsRef.current = ws;
 
-      ws.onopen = () => {
-        setSessionActive(true);
-        setSessionState("CONNECTED");
-        setSessionEvents((prev) => [...prev, "Connected to realtime voice engine."]);
-      };
-
-      ws.onmessage = (event) => {
-        const msg = JSON.parse(event.data);
-        const eventName = msg.event;
-
-        if (eventName === "session_started") {
-          setSessionState("CONNECTED");
-          setSessionEvents((prev) => [...prev, `Session started for Agent ${msg.agent_id}`]);
-        } else if (eventName === "user_started_speaking") {
-          setSessionState("LISTENING");
-        } else if (eventName === "final_transcript") {
-          setSessionEvents((prev) => [...prev, `User: "${msg.text}"`]);
-        } else if (eventName === "agent_thinking") {
-          setSessionState("THINKING");
-        } else if (eventName === "tool_execution_started") {
-          setSessionState("TOOL_EXECUTION");
-          setActiveActions(msg.actions || []);
-          setSessionEvents((prev) => [...prev, `Tool Execution: ${msg.actions?.join(", ")}`]);
-        } else if (eventName === "tool_execution_completed") {
-          setSessionState("THINKING");
-        } else if (eventName === "agent_started_speaking") {
-          setSessionState("SPEAKING");
-          setSessionEvents((prev) => [...prev, `Agent: "${msg.text}"`]);
-        } else if (eventName === "audio_chunk") {
-          // Play returned ElevenLabs audio chunk
-          const audioBytes = Uint8Array.from(atob(msg.audio_base64), (c) => c.charCodeAt(0));
-          const blob = new Blob([audioBytes], { type: "audio/mpeg" });
-          const url = URL.createObjectURL(blob);
-          const audio = new Audio(url);
-          audio.play();
-        } else if (eventName === "agent_finished_speaking") {
-          setSessionState("CONNECTED");
-        } else if (eventName === "provider_error" || eventName === "tool_error") {
-          setSessionState("ERROR");
-          setSessionEvents((prev) => [...prev, `Error: ${msg.error?.message || "Operation failed"}`]);
-        }
-      };
-
-      ws.onclose = () => {
-        setSessionActive(false);
-        setSessionState("IDLE");
-        setSessionEvents((prev) => [...prev, "Voice session ended."]);
-      };
+      setActiveSession({
+        sessionId: sess.session_id,
+        wsUrl,
+        agent: targetAgent,
+      });
+      setIsModalOpen(true);
     } catch (e: any) {
       console.error("Failed to start voice session", e);
-      setSessionState("ERROR");
-      setSessionEvents((prev) => [...prev, `Failed to start session: ${e.message || "Unknown error"}`]);
+      setValidationError(e.message || "Failed to create voice session token.");
+    } finally {
+      setIsInitializing(false);
     }
-  };
-
-  const sendUserSpeech = () => {
-    if (!userSpeechInput.trim() || !wsRef.current) return;
-    wsRef.current.send(
-      JSON.stringify({
-        event: "user_speech",
-        text: userSpeechInput.trim(),
-      })
-    );
-    setUserSpeechInput("");
-  };
-
-  const stopRealtimeSession = () => {
-    if (wsRef.current) {
-      wsRef.current.send(JSON.stringify({ event: "end_session" }));
-      wsRef.current.close();
-    }
-    setSessionActive(false);
-    setSessionState("IDLE");
   };
 
   // -------------------------------------------------------------
@@ -551,85 +507,83 @@ export default function VoiceStudio() {
 
       {/* REALTIME VOICE SESSION TAB */}
       {tab === "session" && (
-        <Panel className="max-w-3xl mx-auto p-6 space-y-6">
-          <div className="flex items-center justify-between border-b border-line pb-4">
-            <div>
-              <h3 className="text-lg font-semibold text-ink flex items-center gap-2">
-                <Sparkles size={18} className="text-violet" /> Realtime Voice Agent Session
-              </h3>
-              <p className="mt-0.5 text-[13px] text-ink-soft">
-                Connect directly to your Zhyra agent's voice stream to test speech recognition, memory, and tool calls.
-              </p>
-            </div>
-
-            <span className={cn(
-              "px-3 py-1 rounded-full text-xs font-semibold uppercase tracking-wider",
-              sessionState === "CONNECTED" && "bg-emerald-100 text-emerald-700",
-              sessionState === "LISTENING" && "bg-blue-100 text-blue-700",
-              sessionState === "THINKING" && "bg-amber-100 text-amber-700 animate-pulse",
-              sessionState === "TOOL_EXECUTION" && "bg-violet-100 text-violet-700 animate-pulse",
-              sessionState === "SPEAKING" && "bg-indigo-100 text-indigo-700",
-              sessionState === "ERROR" && "bg-rose-100 text-rose-700",
-              sessionState === "IDLE" && "bg-canvas-alt text-ink-faint"
-            )}>
-              {sessionState === "TOOL_EXECUTION" ? "WORKING (Tool Call)" : sessionState}
-            </span>
+        <Panel className="max-w-2xl mx-auto p-6 space-y-6">
+          <div className="border-b border-line pb-4">
+            <h3 className="text-lg font-semibold text-ink flex items-center gap-2">
+              <Sparkles size={18} className="text-violet" /> Realtime Voice Agent Session
+            </h3>
+            <p className="mt-0.5 text-[13px] text-ink-soft">
+              Start a real-time voice conversation with your Zhyra AI agent to test speech recognition, tools, and ElevenLabs speech synthesis.
+            </p>
           </div>
 
-          {!sessionActive ? (
-            <div className="space-y-4">
-              <div>
-                <label className="block text-[12px] font-medium text-ink-soft mb-1.5">Select Agent</label>
-                <select
-                  value={sessionAgentId}
-                  onChange={(e) => setSessionAgentId(e.target.value)}
-                  className="w-full rounded-xl border border-line bg-surface px-3.5 py-2.5 text-[13.5px] text-ink focus:outline-none"
-                >
-                  <option value="">Select an Agent...</option>
-                  {agents.map((a) => (
-                    <option key={a.id} value={a.id}>
-                      {a.name} ({a.purpose}) — Voice: {a.voice_config?.voice_name || (a.voice_config?.enabled ? "Enabled" : "Not configured")}
-                    </option>
-                  ))}
-                </select>
+          {validationError && (
+            <div className="flex flex-col gap-2 rounded-2xl bg-rose-50 border border-rose-200 p-4 text-xs text-rose-700">
+              <div className="flex items-center gap-2 font-medium">
+                <AlertCircle size={16} className="text-rose-600 shrink-0" />
+                <span>{validationError}</span>
               </div>
-
-              <Button
-                variant="primary"
-                disabled={!sessionAgentId}
-                icon={<Mic size={15} />}
-                onClick={startRealtimeSession}
-                className="w-full justify-center py-3"
-              >
-                Start Realtime Voice Session
-              </Button>
-            </div>
-          ) : (
-            <div className="space-y-6">
-              {/* Event Log Monitor */}
-              <div className="h-64 rounded-xl border border-line bg-canvas-alt/70 p-4 overflow-y-auto font-mono text-xs space-y-2">
-                {sessionEvents.map((ev, idx) => (
-                  <div key={idx} className="text-ink-soft leading-relaxed">
-                    <span className="text-ink-faint">[{new Date().toLocaleTimeString()}]</span> {ev}
-                  </div>
-                ))}
-              </div>
-
-              {/* Action Bar */}
-              <div className="flex items-center gap-3">
-                <input
-                  type="text"
-                  placeholder="Type speech input or say prompt (e.g. 'Schedule a meeting tomorrow at 3 PM')..."
-                  value={userSpeechInput}
-                  onChange={(e) => setUserSpeechInput(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && sendUserSpeech()}
-                  className="flex-1 rounded-xl border border-line bg-surface px-4 py-2.5 text-[13.5px] text-ink focus:outline-none"
-                />
-                <Button variant="primary" onClick={sendUserSpeech}>Send</Button>
-                <Button variant="outline" icon={<MicOff size={14} />} onClick={stopRealtimeSession}>End</Button>
-              </div>
+              {validationError.includes("Connect ElevenLabs") && (
+                <div className="mt-1">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    icon={<ExternalLink size={12} />}
+                    onClick={() => navigate(appRoute("/integrations"))}
+                  >
+                    Connect ElevenLabs
+                  </Button>
+                </div>
+              )}
+              {validationError.includes("Select a voice") && (
+                <div className="mt-1">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setTab("library")}
+                  >
+                    Browse Voice Library
+                  </Button>
+                </div>
+              )}
             </div>
           )}
+
+          <div className="space-y-5">
+            <div>
+              <label className="block text-[12px] font-medium text-ink-soft mb-1.5">Select Agent</label>
+              <select
+                value={sessionAgentId}
+                onChange={(e) => {
+                  setSessionAgentId(e.target.value);
+                  setValidationError(null);
+                }}
+                className="w-full rounded-xl border border-line bg-surface px-3.5 py-2.5 text-[13.5px] text-ink focus:outline-none"
+              >
+                <option value="">Select an Agent...</option>
+                {agents.map((a) => {
+                  const voiceName =
+                    a.voice_config?.voice_name ||
+                    (a.voice_config?.enabled || a.voice_id ? "Voice Configured" : "No Voice Assigned");
+                  return (
+                    <option key={a.id} value={a.id}>
+                      {a.name} ({a.purpose || "AI Employee"}) — {voiceName}
+                    </option>
+                  );
+                })}
+              </select>
+            </div>
+
+            <Button
+              variant="primary"
+              disabled={!sessionAgentId || isInitializing}
+              icon={<Mic size={15} />}
+              onClick={startRealtimeSession}
+              className="w-full justify-center py-3 text-sm font-semibold"
+            >
+              {isInitializing ? "Initializing Session..." : "Start Realtime Voice Session"}
+            </Button>
+          </div>
         </Panel>
       )}
 
@@ -694,6 +648,20 @@ export default function VoiceStudio() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* REALTIME VOICE MODAL */}
+      {activeSession && (
+        <RealtimeVoiceModal
+          isOpen={isModalOpen}
+          onClose={() => {
+            setIsModalOpen(false);
+            setActiveSession(null);
+          }}
+          agent={activeSession.agent}
+          sessionId={activeSession.sessionId}
+          wsUrl={activeSession.wsUrl}
+        />
+      )}
     </div>
   );
 }

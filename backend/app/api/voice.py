@@ -128,13 +128,16 @@ async def voice_websocket_endpoint(websocket: WebSocket, session_id: str):
             data = json.loads(raw_data)
             event_type = data.get("event")
 
-            if event_type == "user_speech" or event_type == "user_transcript":
-                user_text = data.get("text", "").strip()
-                if not user_text:
-                    continue
+            if event_type in ("user_speech", "user_transcript", "init_greeting"):
+                if event_type == "init_greeting":
+                    user_text = "Hello! Introduce yourself briefly and ask how you can help."
+                else:
+                    user_text = data.get("text", "").strip()
+                    if not user_text:
+                        continue
+                    await websocket.send_json({"event": "user_started_speaking"})
+                    await websocket.send_json({"event": "final_transcript", "text": user_text})
 
-                await websocket.send_json({"event": "user_started_speaking"})
-                await websocket.send_json({"event": "final_transcript", "text": user_text})
                 await websocket.send_json({"event": "agent_thinking"})
 
                 # Execute Zhyra Agent Brain
@@ -155,11 +158,25 @@ async def voice_websocket_endpoint(websocket: WebSocket, session_id: str):
                     continue
 
                 agent_text = ai_reply.get("text") or ai_reply.get("message") or "I processed your request."
-                actions = ai_reply.get("actions", [])
+                raw_actions = ai_reply.get("actions", [])
 
-                if actions:
-                    await websocket.send_json({"event": "tool_execution_started", "actions": actions})
-                    await websocket.send_json({"event": "tool_execution_completed", "actions": actions})
+                if raw_actions:
+                    formatted_actions = []
+                    for act in raw_actions:
+                        act_str = str(act).lower()
+                        if "calendar" in act_str:
+                            formatted_actions.append("Calendar event updated")
+                        elif "gmail" in act_str or "email" in act_str:
+                            formatted_actions.append("Email sent")
+                        elif "drive" in act_str or "doc" in act_str:
+                            formatted_actions.append("Document processed")
+                        elif "maps" in act_str or "place" in act_str:
+                            formatted_actions.append("Location searched")
+                        else:
+                            formatted_actions.append(f"{str(act).title()} completed")
+
+                    await websocket.send_json({"event": "tool_execution_started", "actions": formatted_actions})
+                    await websocket.send_json({"event": "tool_execution_completed", "actions": formatted_actions})
 
                 # Generate ElevenLabs TTS
                 await websocket.send_json({"event": "agent_started_speaking", "text": agent_text})
