@@ -1,4 +1,4 @@
-export type AgentStatus = "active" | "training" | "paused";
+export type AgentStatus = "active" | "paused";
 
 export interface Agent {
   id: string;
@@ -9,112 +9,77 @@ export interface Agent {
   status: AgentStatus;
   capabilities: string[];
   channels: string[];
-  conversationsToday: number;
-  resolutionRate: number;
-  health: number; // 0-100
-  personality: string;
-  role: string;
-  goals: string[];
-  tools: string[];
-  knowledgeSources: string[];
-  recentImprovement: string;
+  conversationsToday?: number;
+  resolutionRate?: number;
+  health?: number;
+  personality?: string;
+  role?: string;
+  goals?: string[];
+  tools?: string[];
+  knowledgeSources?: string[];
+  recentImprovement?: string;
 }
 
 export const agents: Agent[] = [
   {
-    id: "agt-nova",
-    name: "Nova",
-    purpose: "Customer Support Lead",
+    id: "agt-tara",
+    name: "Tara",
+    purpose: "Customer Support Assistant",
     avatarGradient: "from-[#2F6BFF] to-[#8B7CF6]",
-    initials: "NV",
+    initials: "T",
     status: "active",
-    capabilities: ["Answers FAQs", "Handles refunds", "Escalates edge cases", "Sentiment aware"],
-    channels: ["Web Chat", "WhatsApp", "Email"],
-    conversationsToday: 0,
-    resolutionRate: 0,
-    health: 0,
-    personality: "Warm, concise, and endlessly patient.",
-    role: "First line of support across every channel.",
-    goals: ["Resolve 90%+ without escalation", "Keep CSAT above 4.7", "Respond within 8 seconds"],
-    tools: ["Zendesk", "Stripe", "Order DB"],
-    knowledgeSources: ["Support Macros", "Refund Policy", "Product Manual v4"],
-    recentImprovement: "Learned new shipping policy from 12 updated documents.",
+    capabilities: [],
+    channels: ["Web Chat", "Email"],
+    tools: [],
+    knowledgeSources: [],
   },
   {
-    id: "agt-orion",
-    name: "Orion",
+    id: "agt-kayal",
+    name: "Kayal",
     purpose: "Appointment Concierge",
     avatarGradient: "from-[#8B7CF6] to-[#2F6BFF]",
-    initials: "OR",
+    initials: "K",
     status: "active",
-    capabilities: ["Books appointments", "Reschedules", "Sends reminders", "Handles cancellations"],
-    channels: ["Phone", "Web Chat", "SMS"],
-    conversationsToday: 0,
-    resolutionRate: 0,
-    health: 0,
-    personality: "Friendly and efficient, never keeps people waiting.",
-    role: "Manages the full booking lifecycle for the clinic team.",
-    goals: ["Fill 95% of available slots", "Reduce no-shows by 20%"],
-    tools: ["Google Calendar", "Calendly", "Twilio"],
-    knowledgeSources: ["Clinic Hours", "Provider Directory"],
-    recentImprovement: "Now handles multi-provider rescheduling automatically.",
+    capabilities: [],
+    channels: ["Web Chat"],
+    tools: [],
+    knowledgeSources: [],
   },
   {
-    id: "agt-sage",
-    name: "Sage",
-    purpose: "Knowledge & Research Assistant",
+    id: "agt-mitran",
+    name: "Mitran",
+    purpose: "Knowledge Assistant",
     avatarGradient: "from-[#16A672] to-[#2F6BFF]",
-    initials: "SG",
-    status: "training",
-    capabilities: ["Summarizes documents", "Answers internal questions", "Cites sources"],
-    channels: ["Slack", "Internal Portal"],
-    conversationsToday: 0,
-    resolutionRate: 0,
-    health: 0,
-    personality: "Precise, thoughtful, cites everything.",
-    role: "Internal knowledge assistant for the operations team.",
-    goals: ["Reduce time-to-answer for internal queries", "Maintain source accuracy"],
-    tools: ["Notion", "Google Drive"],
-    knowledgeSources: ["Ops Wiki", "Onboarding Docs"],
-    recentImprovement: "Currently learning the new vendor management policy.",
-  },
-  {
-    id: "agt-zhyra-sales",
-    name: "Halo",
-    purpose: "Sales Qualification Agent",
-    avatarGradient: "from-[#D89A2A] to-[#E15B5B]",
-    initials: "HL",
+    initials: "M",
     status: "active",
-    capabilities: ["Qualifies leads", "Books demos", "Answers pricing questions"],
-    channels: ["Web Chat", "Email"],
-    conversationsToday: 0,
-    resolutionRate: 0,
-    health: 0,
-    personality: "Consultative and sharp, never pushy.",
-    role: "Qualifies inbound leads before handoff to sales reps.",
-    goals: ["Increase demo booking rate", "Route only qualified leads"],
-    tools: ["HubSpot", "Calendly"],
-    knowledgeSources: ["Pricing Sheet", "Battlecards"],
-    recentImprovement: "Improved objection handling using last week's call transcripts.",
+    capabilities: [],
+    channels: ["Web Chat"],
+    tools: [],
+    knowledgeSources: [],
   },
   {
-    id: "agt-relay",
-    name: "Relay",
-    purpose: "Order & Logistics Tracker",
-    avatarGradient: "from-[#2F6BFF] to-[#16A672]",
-    initials: "RL",
-    status: "paused",
-    capabilities: ["Tracks orders", "Handles delays", "Issues store credit"],
-    channels: ["Web Chat", "WhatsApp"],
-    conversationsToday: 0,
-    resolutionRate: 0,
-    health: 0,
-    personality: "Direct and reassuring during delays.",
-    role: "Keeps customers informed about order status.",
-    goals: ["Proactively flag delays", "Reduce 'where is my order' tickets"],
-    tools: ["Shopify", "ShipStation"],
-    knowledgeSources: ["Shipping Zones", "Carrier SLAs"],
-    recentImprovement: "Paused while shipping provider migration completes.",
+    id: "agt-agan",
+    name: "Agan",
+    purpose: "Sales Qualification Assistant",
+    avatarGradient: "from-[#D89A2A] to-[#E15B5B]",
+    initials: "A",
+    status: "active",
+    capabilities: [],
+    channels: ["Web Chat", "Email"],
+    tools: [],
+    knowledgeSources: [],
+  },
+  {
+    id: "agt-mathi",
+    name: "Mathi",
+    purpose: "Operations Assistant",
+    avatarGradient: "from-[#E11D48] to-[#8B7CF6]",
+    initials: "M",
+    status: "active",
+    capabilities: [],
+    channels: ["Web Chat"],
+    tools: [],
+    knowledgeSources: [],
   },
 ];
 
@@ -128,14 +93,14 @@ export interface ActivityItem {
 }
 
 export const activity: ActivityItem[] = [
-  { id: "a1", type: "booking", title: "Orion booked an appointment", detail: "Maria Chen — Dermatology consult, Thu 2:30pm", agent: "Orion", time: "2m ago" },
+  { id: "a1", type: "booking", title: "Kayal booked an appointment", detail: "Maria Chen — Dermatology consult, Thu 2:30pm", agent: "Kayal", time: "2m ago" },
   { id: "a2", type: "knowledge", title: "Knowledge updated", detail: "Refund Policy v3 indexed — 214 chunks re-embedded", time: "11m ago" },
-  { id: "a3", type: "workflow", title: "Workflow executed", detail: "\"VIP Escalation\" triggered for order #88213", agent: "Nova", time: "24m ago" },
-  { id: "a4", type: "handoff", title: "Human takeover requested", detail: "Billing dispute flagged as high sensitivity", agent: "Nova", time: "38m ago" },
-  { id: "a5", type: "feedback", title: "Customer feedback received", detail: "\"That was faster than talking to a person!\" — 5★", agent: "Halo", time: "1h ago" },
-  { id: "a6", type: "booking", title: "Orion rescheduled an appointment", detail: "James Cole moved to Friday 10:00am", agent: "Orion", time: "1h ago" },
-  { id: "a7", type: "workflow", title: "Workflow executed", detail: "\"Lead Routing\" sent 4 qualified leads to Sales", agent: "Halo", time: "2h ago" },
-  { id: "a8", type: "knowledge", title: "Knowledge gap detected", detail: "Sage flagged missing documentation on EU returns", time: "3h ago" },
+  { id: "a3", type: "workflow", title: "Workflow executed", detail: "\"VIP Escalation\" triggered for order #88213", agent: "Tara", time: "24m ago" },
+  { id: "a4", type: "handoff", title: "Human takeover requested", detail: "Billing dispute flagged as high sensitivity", agent: "Tara", time: "38m ago" },
+  { id: "a5", type: "feedback", title: "Customer feedback received", detail: "\"That was faster than talking to a person!\" — 5★", agent: "Agan", time: "1h ago" },
+  { id: "a6", type: "booking", title: "Kayal rescheduled an appointment", detail: "James Cole moved to Friday 10:00am", agent: "Kayal", time: "1h ago" },
+  { id: "a7", type: "workflow", title: "Workflow executed", detail: "\"Lead Routing\" sent 4 qualified leads to Sales", agent: "Agan", time: "2h ago" },
+  { id: "a8", type: "knowledge", title: "Knowledge gap detected", detail: "Mitran flagged missing documentation on EU returns", time: "3h ago" },
 ];
 
 export interface ConversationMsg {
@@ -171,7 +136,7 @@ export const conversations: Conversation[] = [
     initials: "MC",
     preview: "Can I move my appointment to next week?",
     channel: "Web Chat",
-    agent: "Orion",
+    agent: "Kayal",
     status: "resolved",
     time: "2m",
     unread: true,
@@ -193,7 +158,7 @@ export const conversations: Conversation[] = [
     initials: "JC",
     preview: "My order hasn't arrived and it's been 9 days",
     channel: "WhatsApp",
-    agent: "Nova",
+    agent: "Tara",
     status: "escalated",
     time: "18m",
     intent: "Delayed shipment complaint",
@@ -213,7 +178,7 @@ export const conversations: Conversation[] = [
     initials: "AT",
     preview: "Do you offer a student discount?",
     channel: "Email",
-    agent: "Halo",
+    agent: "Agan",
     status: "active",
     time: "31m",
     intent: "Pricing inquiry",
@@ -232,7 +197,7 @@ export const conversations: Conversation[] = [
     initials: "DB",
     preview: "Thanks for sorting that out so quickly!",
     channel: "Web Chat",
-    agent: "Nova",
+    agent: "Tara",
     status: "resolved",
     time: "1h",
     intent: "Billing question",
@@ -282,12 +247,12 @@ export interface MemoryItem {
 }
 
 export const memories: MemoryItem[] = [
-  { id: "mem1", type: "long-term", title: "Prefers WhatsApp over email", detail: "Learned from 6 conversations over 3 months", agent: "Nova", time: "Updated 2d ago", protected: true },
-  { id: "mem2", type: "preference", title: "Vegetarian catering only", detail: "Noted during event booking on Apr 2", agent: "Orion", time: "Updated 1w ago" },
-  { id: "mem3", type: "short-term", title: "Currently discussing invoice #4432", detail: "Will expire after conversation closes", agent: "Nova", time: "Active now" },
-  { id: "mem4", type: "long-term", title: "VIP customer — priority routing", detail: "Manually protected by team lead", agent: "Halo", time: "Updated 3w ago", protected: true },
-  { id: "mem5", type: "deleted", title: "Old billing address", detail: "Forgotten at customer's request on May 14", agent: "Nova", time: "Deleted 2w ago" },
-  { id: "mem6", type: "preference", title: "Prefers concise responses", detail: "Detected tone preference from feedback", agent: "Sage", time: "Updated 4d ago" },
+  { id: "mem1", type: "long-term", title: "Prefers WhatsApp over email", detail: "Learned from 6 conversations over 3 months", agent: "Tara", time: "Updated 2d ago", protected: true },
+  { id: "mem2", type: "preference", title: "Vegetarian catering only", detail: "Noted during event booking on Apr 2", agent: "Kayal", time: "Updated 1w ago" },
+  { id: "mem3", type: "short-term", title: "Currently discussing invoice #4432", detail: "Will expire after conversation closes", agent: "Tara", time: "Active now" },
+  { id: "mem4", type: "long-term", title: "VIP customer — priority routing", detail: "Manually protected by team lead", agent: "Agan", time: "Updated 3w ago", protected: true },
+  { id: "mem5", type: "deleted", title: "Old billing address", detail: "Forgotten at customer's request on May 14", agent: "Tara", time: "Deleted 2w ago" },
+  { id: "mem6", type: "preference", title: "Prefers concise responses", detail: "Detected tone preference from feedback", agent: "Mitran", time: "Updated 4d ago" },
 ];
 
 export interface Integration {
@@ -302,12 +267,12 @@ export interface Integration {
 }
 
 export const integrations: Integration[] = [
-  { id: "int1", name: "Google Calendar", category: "Scheduling", connected: true, description: "Two-way sync for bookings and availability.", syncedAgents: ["Orion"], lastSync: "1m ago", health: 100 },
-  { id: "int2", name: "WhatsApp Business", category: "Messaging", connected: true, description: "Send and receive customer conversations.", syncedAgents: ["Nova", "Relay"], lastSync: "Just now", health: 98 },
-  { id: "int3", name: "Gmail / Email", category: "Messaging", connected: true, description: "Inbound and outbound support email.", syncedAgents: ["Nova", "Halo"], lastSync: "5m ago", health: 95 },
-  { id: "int4", name: "HubSpot CRM", category: "CRM", connected: true, description: "Sync leads, contacts, and deal stages.", syncedAgents: ["Halo"], lastSync: "12m ago", health: 90 },
-  { id: "int5", name: "Stripe", category: "Payments", connected: true, description: "Process refunds and view billing history.", syncedAgents: ["Nova"], lastSync: "20m ago", health: 100 },
-  { id: "int6", name: "Google Drive", category: "Knowledge", connected: true, description: "Auto-import and sync knowledge documents.", syncedAgents: ["Sage"], lastSync: "1h ago", health: 82 },
+  { id: "int1", name: "Google Calendar", category: "Scheduling", connected: true, description: "Two-way sync for bookings and availability.", syncedAgents: ["Kayal"], lastSync: "1m ago", health: 100 },
+  { id: "int2", name: "WhatsApp Business", category: "Messaging", connected: true, description: "Send and receive customer conversations.", syncedAgents: ["Tara", "Mathi"], lastSync: "Just now", health: 98 },
+  { id: "int3", name: "Gmail / Email", category: "Messaging", connected: true, description: "Inbound and outbound support email.", syncedAgents: ["Tara", "Agan"], lastSync: "5m ago", health: 95 },
+  { id: "int4", name: "HubSpot CRM", category: "CRM", connected: true, description: "Sync leads, contacts, and deal stages.", syncedAgents: ["Agan"], lastSync: "12m ago", health: 90 },
+  { id: "int5", name: "Stripe", category: "Payments", connected: true, description: "Process refunds and view billing history.", syncedAgents: ["Tara"], lastSync: "20m ago", health: 100 },
+  { id: "int6", name: "Google Drive", category: "Knowledge", connected: true, description: "Auto-import and sync knowledge documents.", syncedAgents: ["Mitran"], lastSync: "1h ago", health: 82 },
   { id: "int7", name: "Slack", category: "Collaboration", connected: false, description: "Bring humans into escalations instantly.", syncedAgents: [], lastSync: "Never", health: 0 },
   { id: "int8", name: "Notion", category: "Knowledge", connected: false, description: "Sync internal wikis as knowledge sources.", syncedAgents: [], lastSync: "Never", health: 0 },
 ];

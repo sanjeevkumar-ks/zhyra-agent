@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Plus, Search, SlidersHorizontal, X } from "lucide-react";
+import { Plus, Search, SlidersHorizontal, Trash2, X } from "lucide-react";
 import { apiClient } from "../lib/apiClient";
 import { appRoute } from "../lib/routes";
 import { AskZhyraChip, Avatar, Badge, Button, PageHeader, StatusDot } from "../components/ui";
@@ -9,8 +9,9 @@ import { AskZhyraChip, Avatar, Badge, Button, PageHeader, StatusDot } from "../c
 export default function Agents() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const [filter, setFilter] = useState<"all" | "active" | "training" | "paused">("all");
+  const [filter, setFilter] = useState<"all" | "active" | "paused">("all");
   const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<any | null>(null);
 
   // Form State
   const [name, setName] = useState("");
@@ -33,7 +34,6 @@ export default function Agents() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["agents"] });
       setIsCreateOpen(false);
-      // Reset form
       setName("");
       setPurpose("");
       setPersonality("");
@@ -41,6 +41,15 @@ export default function Agents() {
       setGoals("");
       setCapabilities("");
       setChannels(["Web Chat"]);
+    },
+  });
+
+  // Delete Agent Mutation
+  const deleteAgentMutation = useMutation({
+    mutationFn: (agentId: string) => apiClient.delete<any>(`/api/agents/${agentId}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["agents"] });
+      setDeleteTarget(null);
     },
   });
 
@@ -92,7 +101,7 @@ export default function Agents() {
       <PageHeader
         eyebrow="Your AI workforce"
         title="Agents"
-        description="Every AI employee working across your business — what they do, how healthy they are, and guide their configurations."
+        description="Every AI employee working across your business — configure directives, connect tools, and monitor activity."
         actions={
           <>
             <AskZhyraChip label="Ask Zhyra which agent to build next" />
@@ -105,7 +114,7 @@ export default function Agents() {
 
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-center gap-1.5 rounded-full border border-line bg-surface p-1">
-          {(["all", "active", "training", "paused"] as const).map((f) => (
+          {(["all", "active", "paused"] as const).map((f) => (
             <button
               key={f}
               onClick={() => setFilter(f)}
@@ -128,7 +137,6 @@ export default function Agents() {
       </div>
 
       {isLoading ? (
-        // Agents Skeletons
         <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3">
           {Array.from({ length: 3 }).map((_, idx) => (
             <div key={idx} className="h-56 rounded-2xl border border-line bg-surface p-6 space-y-4 animate-pulse">
@@ -147,56 +155,80 @@ export default function Agents() {
       ) : (
         <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3">
           {filtered.map((agent) => (
-            <button
+            <div
               key={agent.id}
-              onClick={() => navigate(appRoute(`/agents/${agent.id}`))}
-              className="group flex flex-col gap-5 rounded-2xl border border-line bg-surface p-6 text-left shadow-soft transition-all duration-200 hover:-translate-y-1 hover:border-ink/10 hover:shadow-soft-lg"
+              className="group relative flex flex-col gap-5 rounded-2xl border border-line bg-surface p-6 text-left shadow-soft transition-all duration-200 hover:-translate-y-1 hover:border-ink/10 hover:shadow-soft-lg"
             >
               <div className="flex items-start justify-between">
-                <div className="flex items-center gap-3">
+                <div
+                  className="flex items-center gap-3 cursor-pointer flex-1"
+                  onClick={() => navigate(appRoute(`/agents/${agent.id}`))}
+                >
                   <Avatar initials={agent.initials || "AI"} gradient={agent.avatar_gradient || "from-[#2F6BFF] to-[#8B7CF6]"} size={44} />
                   <div>
-                    <p className="text-[15px] font-semibold text-ink">{agent.name}</p>
-                    <p className="text-[12.5px] text-ink-soft">{agent.purpose}</p>
+                    <p className="text-[15px] font-semibold text-ink group-hover:text-accent transition-colors">{agent.name}</p>
+                    <p className="text-[12.5px] text-ink-soft">{agent.purpose || "Not configured"}</p>
                   </div>
                 </div>
-                <span className="flex items-center gap-1.5 text-[12px] capitalize text-ink-faint">
-                  <StatusDot status={agent.status} />
-                  {agent.status}
-                </span>
-              </div>
-
-              <div className="flex flex-wrap gap-1.5">
-                {agent.capabilities?.slice(0, 3).map((c: string) => (
-                  <Badge key={c}>{c}</Badge>
-                )) || <span className="text-[12px] text-ink-faint">No capabilities configured</span>}
-              </div>
-
-              <div className="flex items-center gap-1.5 text-[12px] text-ink-faint">
-                {agent.channels?.map((c: string, i: number) => (
-                  <span key={c} className="flex items-center gap-1.5">
-                    {i > 0 && <span className="h-0.5 w-0.5 rounded-full bg-ink-faint" />}
-                    {c}
+                <div className="flex items-center gap-2">
+                  <span className="flex items-center gap-1.5 text-[12px] capitalize text-ink-faint">
+                    <StatusDot status={agent.status || "active"} />
+                    {agent.status || "active"}
                   </span>
-                )) || "None"}
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setDeleteTarget(agent);
+                    }}
+                    title="Delete Agent"
+                    className="opacity-0 group-hover:opacity-100 p-1.5 text-ink-faint hover:text-rose-500 rounded-lg hover:bg-rose-500/10 transition-all"
+                  >
+                    <Trash2 size={15} />
+                  </button>
+                </div>
               </div>
 
-              <div className="mt-1 flex items-center justify-between border-t border-line pt-4">
+              <div
+                className="flex-1 cursor-pointer space-y-3"
+                onClick={() => navigate(appRoute(`/agents/${agent.id}`))}
+              >
+                <div className="flex flex-wrap gap-1.5">
+                  {agent.capabilities && agent.capabilities.length > 0 ? (
+                    agent.capabilities.slice(0, 3).map((c: string) => (
+                      <Badge key={c}>{c}</Badge>
+                    ))
+                  ) : (
+                    <span className="text-[12px] text-ink-faint">No capabilities configured</span>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-1.5 text-[12px] text-ink-faint">
+                  {agent.channels && agent.channels.length > 0 ? (
+                    agent.channels.map((c: string, i: number) => (
+                      <span key={c} className="flex items-center gap-1.5">
+                        {i > 0 && <span className="h-0.5 w-0.5 rounded-full bg-ink-faint" />}
+                        {c}
+                      </span>
+                    ))
+                  ) : (
+                    <span>Web Chat</span>
+                  )}
+                </div>
+              </div>
+
+              <div
+                className="mt-1 flex items-center justify-between border-t border-line pt-4 cursor-pointer"
+                onClick={() => navigate(appRoute(`/agents/${agent.id}`))}
+              >
                 <div>
                   <p className="text-lg font-semibold tabular-nums text-ink">{agent.conversations_today ?? 0}</p>
                   <p className="text-[11.5px] text-ink-faint">Conversations today</p>
                 </div>
-                <div className="flex items-center gap-2">
-                  <div className="h-1.5 w-20 overflow-hidden rounded-full bg-canvas-alt">
-                    <div
-                      className="h-full rounded-full bg-emerald"
-                      style={{ width: `${agent.health ?? 100}%`, background: (agent.health ?? 100) > 85 ? "#16A672" : (agent.health ?? 100) > 70 ? "#D89A2A" : "#E15B5B" }}
-                    />
-                  </div>
-                  <span className="text-[12px] font-medium text-ink-soft">{agent.health ?? 100}%</span>
+                <div className="text-right">
+                  <p className="text-[12.5px] font-medium text-ink-soft">{agent.tools?.length || 0} Tools connected</p>
                 </div>
               </div>
-            </button>
+            </div>
           ))}
 
           <button
@@ -208,6 +240,30 @@ export default function Agents() {
             </span>
             <span className="text-[13.5px] font-medium">Create a new AI employee</span>
           </button>
+        </div>
+      )}
+
+      {/* Delete Agent Modal */}
+      {deleteTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4">
+          <div className="w-full max-w-md bg-surface border border-line rounded-2xl p-6 space-y-4 shadow-soft-lg animate-scale-in">
+            <h3 className="text-[17px] font-semibold text-ink">Delete {deleteTarget.name}?</h3>
+            <p className="text-[13.5px] text-ink-soft leading-relaxed">
+              This will permanently remove this AI agent and its configuration. Historical conversations and analytics will be preserved.
+            </p>
+            <div className="pt-2 flex justify-end gap-3">
+              <Button variant="outline" onClick={() => setDeleteTarget(null)}>
+                Cancel
+              </Button>
+              <Button
+                className="bg-rose-600 hover:bg-rose-700 text-white border-transparent"
+                disabled={deleteAgentMutation.isPending}
+                onClick={() => deleteAgentMutation.mutate(deleteTarget.id)}
+              >
+                {deleteAgentMutation.isPending ? "Deleting..." : "Delete agent"}
+              </Button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -228,7 +284,7 @@ export default function Agents() {
                 <input
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  placeholder="e.g. Nova"
+                  placeholder="e.g. Tara"
                   required
                   className="w-full rounded-2xl border border-line bg-canvas-alt/30 px-4 py-3 text-[14px] text-ink focus:outline-none"
                 />
@@ -239,7 +295,7 @@ export default function Agents() {
                 <input
                   value={purpose}
                   onChange={(e) => setPurpose(e.target.value)}
-                  placeholder="e.g. Customer Support Lead"
+                  placeholder="e.g. Customer Support Assistant"
                   required
                   className="w-full rounded-2xl border border-line bg-canvas-alt/30 px-4 py-3 text-[14px] text-ink focus:outline-none"
                 />
@@ -261,7 +317,7 @@ export default function Agents() {
                 <input
                   value={goals}
                   onChange={(e) => setGoals(e.target.value)}
-                  placeholder="Resolve 90%+ without escalation, Respond in 8 seconds"
+                  placeholder="Resolve customer inquiries, Respond quickly"
                   className="w-full rounded-2xl border border-line bg-canvas-alt/30 px-4 py-3 text-[14px] text-ink focus:outline-none"
                 />
               </div>
@@ -271,7 +327,7 @@ export default function Agents() {
                 <input
                   value={capabilities}
                   onChange={(e) => setCapabilities(e.target.value)}
-                  placeholder="Answers FAQs, Sentiment aware, Handles refunds"
+                  placeholder="Answers FAQs, Sentiment aware"
                   className="w-full rounded-2xl border border-line bg-canvas-alt/30 px-4 py-3 text-[14px] text-ink focus:outline-none"
                 />
               </div>

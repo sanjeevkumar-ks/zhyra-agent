@@ -26,14 +26,7 @@ class AgentService:
             data = doc.to_dict()
             if data.get("workspace_id") == workspace_id:
                 aid = data.get("id")
-                baseline = 0
-                if "nova" in aid.lower():
-                    baseline = 0
-                elif "orion" in aid.lower():
-                    baseline = 0
-                elif "sage" in aid.lower():
-                    baseline = 0
-                data["conversations_today"] = baseline + convo_counts.get(aid, 0)
+                data["conversations_today"] = convo_counts.get(aid, 0)
                 results.append(data)
         return results
 
@@ -58,14 +51,7 @@ class AgentService:
         except Exception:
             pass
 
-        baseline = 0
-        if "nova" in agent_id.lower():
-            baseline = 0
-        elif "orion" in agent_id.lower():
-            baseline = 0
-        elif "sage" in agent_id.lower():
-            baseline = 0
-        data["conversations_today"] = baseline + count
+        data["conversations_today"] = count
         return data
 
     @staticmethod
@@ -176,82 +162,93 @@ class AgentService:
         log_info(f"Deleted Agent {agent_id} from workspace {workspace_id}")
 
     @staticmethod
+    @staticmethod
     async def provision_default_agents(workspace_id: str) -> None:
         """Seeds initial default agents for workspace sandbox exploration."""
         defaults = [
             {
-                "id": f"agt_nova_{workspace_id[:5]}",
-                "name": "Nova",
-                "purpose": "Customer Support Lead",
+                "id": f"agt_tara_{workspace_id[:5]}",
+                "name": "Tara",
+                "purpose": "Customer Support Assistant",
                 "avatar_gradient": "from-[#2F6BFF] to-[#8B7CF6]",
-                "initials": "NV",
+                "initials": "T",
                 "status": "active",
-                "capabilities": ["Answers FAQs", "Handles refunds", "Escalates edge cases", "Sentiment aware"],
-                "channels": ["Web Chat", "WhatsApp", "Email"],
-                "conversations_today": 0,
-                "resolution_rate": 0,
-                "health": 0,
-                "personality": "Warm, concise, and endlessly patient.",
-                "role": "First line of support across every channel.",
-                "goals": ["Resolve 90%+ without escalation", "Keep CSAT above 4.7", "Respond within 8 seconds"],
-                "tools": ["Zendesk", "Stripe", "Order DB"],
-                "knowledge_sources": ["Support Macros", "Refund Policy", "Product Manual v4"],
-                "recent_improvement": "Learned new shipping policy from 12 updated documents.",
+                "channels": ["Web Chat", "Email"],
+                "tools": [],
+                "knowledge_sources": [],
                 "overrides": {
                     "provider": "gemini",
                     "model": "gemini-3.5-flash",
                     "temperature": 0.3,
-                    "system_prompt": "You are Nova, Customer Support Lead. Be warm, concise, and endlessly patient."
+                    "system_prompt": "You are Tara, Customer Support Assistant. Help users resolve inquiries politely and accurately."
                 }
             },
             {
-                "id": f"agt_orion_{workspace_id[:5]}",
-                "name": "Orion",
+                "id": f"agt_kayal_{workspace_id[:5]}",
+                "name": "Kayal",
                 "purpose": "Appointment Concierge",
                 "avatar_gradient": "from-[#8B7CF6] to-[#2F6BFF]",
-                "initials": "OR",
+                "initials": "K",
                 "status": "active",
-                "capabilities": ["Books appointments", "Reschedules", "Sends reminders", "Handles cancellations"],
-                "channels": ["Phone", "Web Chat", "SMS"],
-                "conversations_today": 0,
-                "resolution_rate": 0,
-                "health": 0,
-                "personality": "Friendly and efficient, never keeps people waiting.",
-                "role": "Manages the full booking lifecycle for the clinic team.",
-                "goals": ["Fill 95% of available slots", "Reduce no-shows by 20%"],
-                "tools": ["Google Calendar", "Calendly", "Twilio"],
-                "knowledge_sources": ["Clinic Hours", "Provider Directory"],
-                "recent_improvement": "Now handles multi-provider rescheduling automatically.",
+                "channels": ["Web Chat"],
+                "tools": [],
+                "knowledge_sources": [],
                 "overrides": {
                     "provider": "openai",
                     "model": "gpt-4o-mini",
                     "temperature": 0.5,
-                    "system_prompt": "You are Orion, the Appointment Concierge. You are friendly, prompt, and focus on scheduling appointments."
+                    "system_prompt": "You are Kayal, Appointment Concierge. Assist users with scheduling and bookings."
                 }
             },
             {
-                "id": f"agt_sage_{workspace_id[:5]}",
-                "name": "Sage",
-                "purpose": "Knowledge & Research Assistant",
+                "id": f"agt_mitran_{workspace_id[:5]}",
+                "name": "Mitran",
+                "purpose": "Knowledge Assistant",
                 "avatar_gradient": "from-[#16A672] to-[#2F6BFF]",
-                "initials": "SG",
-                "status": "training",
-                "capabilities": ["Summarizes documents", "Answers internal questions", "Cites sources"],
-                "channels": ["Slack", "Internal Portal"],
-                "conversations_today": 0,
-                "resolution_rate": 0,
-                "health": 0,
-                "personality": "Precise, thoughtful, cites everything.",
-                "role": "Internal knowledge assistant for the operations team.",
-                "goals": ["Reduce time-to-answer for internal queries", "Maintain source accuracy"],
-                "tools": ["Notion", "Google Drive"],
-                "knowledge_sources": ["Ops Wiki", "Onboarding Docs"],
-                "recent_improvement": "Currently learning the new vendor management policy.",
+                "initials": "M",
+                "status": "active",
+                "channels": ["Web Chat"],
+                "tools": [],
+                "knowledge_sources": [],
                 "overrides": {
                     "provider": "claude",
                     "model": "claude-3-5-sonnet-latest",
                     "temperature": 0.1,
-                    "system_prompt": "You are Sage, a precise and thoughtful Knowledge Assistant. Always cite sources."
+                    "system_prompt": "You are Mitran, Knowledge Assistant. Answer questions accurately based on documentation."
+                }
+            },
+            {
+                "id": f"agt_agan_{workspace_id[:5]}",
+                "name": "Agan",
+                "purpose": "Sales Qualification Assistant",
+                "avatar_gradient": "from-[#D89A2A] to-[#2F6BFF]",
+                "initials": "A",
+                "status": "active",
+                "channels": ["Web Chat", "Email"],
+                "tools": [],
+                "knowledge_sources": [],
+                "overrides": {
+                    "provider": "gemini",
+                    "model": "gemini-3.5-flash",
+                    "temperature": 0.4,
+                    "system_prompt": "You are Agan, Sales Qualification Assistant. Qualify leads and answer product questions."
+                }
+            },
+            {
+                "id": f"agt_mathi_{workspace_id[:5]}",
+                "name": "Mathi",
+                "purpose": "Operations Assistant",
+                "avatar_gradient": "from-[#E11D48] to-[#8B7CF6]",
+                "initials": "M",
+                "status": "active",
+                "channels": ["Web Chat"],
+                "tools": [],
+                "knowledge_sources": [],
+                "overrides": {
+                    "provider": "openai",
+                    "model": "gpt-4o-mini",
+                    "temperature": 0.2,
+                    "system_prompt": "You are Mathi, Operations Assistant. Assist with operational tracking and task routing."
                 }
             }
         ]
@@ -261,4 +258,4 @@ class AgentService:
             agent["workspace_id"] = workspace_id
             ref.set(agent)
             
-        log_info(f"Seeded default agents Nova, Orion, and Sage for workspace {workspace_id}")
+        log_info(f"Seeded default agents (Tara, Kayal, Mitran, Agan, Mathi) for workspace {workspace_id}")

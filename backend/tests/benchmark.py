@@ -24,7 +24,7 @@ MOCK_HISTORY_LONG = [
 ]
 
 MOCK_AGENT_DATA = {
-    "name": "Nova",
+    "name": "Tara",
     "purpose": "General workspace assistant helping with tools and documents",
     "tools": ["GoogleCalendar", "Gmail", "Shopify", "Razorpay", "GoogleDrive"],
     "knowledge_sources": ["Refund Policy.txt", "Operations Manual.txt"]
@@ -75,7 +75,7 @@ def simulate_legacy_prompt(task) -> int:
     )
     
     full_prompt = (
-        f"You are Nova. Purpose: General assistant.\n{tools_prompt}\n\n"
+        f"You are Tara. Purpose: General assistant.\n{tools_prompt}\n\n"
         f"Conversational History:\n{history_str}\n"
         f"Context docs:\n{rag_str}\n\n"
         f"Customer: {task['query']}\nResponse:"

@@ -276,7 +276,7 @@ function ConversationWorkspace({
     };
 
   const customerName = active.customer_name || active.customer || "Client";
-  const agentName = active.agent_name || active.agent || "Nova";
+  const agentName = active.agent_name || active.agent || "Tara";
   const activeStatus = active.status || "active";
   const initials =
     active.initials ||
@@ -373,7 +373,7 @@ function ConversationWorkspace({
                           {cStatus}
                         </Badge>
                       )}
-                      <span className="text-[11px] text-ink-faint">{c.agent_name || c.agent || "Nova"}</span>
+                      <span className="text-[11px] text-ink-faint">{c.agent_name || c.agent || "Tara"}</span>
                     </div>
                   </div>
                 </button>

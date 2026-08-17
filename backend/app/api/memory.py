@@ -28,7 +28,7 @@ async def create_memory(payload: dict, workspace_id: str = Depends(get_user_work
         "detail": payload.get("detail", ""),
         "type": payload.get("type", "short-term"),
         "time": "Just now",
-        "agent": payload.get("agent", "Nova"),
+        "agent": payload.get("agent", "Tara"),
         "protected": payload.get("protected", False)
     }
     doc_ref.set(mem_data)

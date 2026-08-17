@@ -92,7 +92,7 @@ class AuthService:
             "detail": "Elena corrected invoice pricing margin overrides for clinical consultations.",
             "type": "long-term",
             "time": "2h ago",
-            "agent": "Nova",
+            "agent": "Tara",
             "protected": True
         })
         
@@ -104,7 +104,7 @@ class AuthService:
             "detail": "Patient prefers SMS reminders instead of direct telephone calls.",
             "type": "preference",
             "time": "1d ago",
-            "agent": "Orion",
+            "agent": "Kayal",
             "protected": False
         })
         
@@ -116,11 +116,11 @@ class AuthService:
             "detail": "Checked inventory levels for flu vaccination supplies.",
             "type": "short-term",
             "time": "2d ago",
-            "agent": "Sage",
+            "agent": "Mitran",
             "protected": False
         })
         
-        # Load mock default agents (Nova, Orion, Sage) to give user a rich first-load experience
+        # Load default agents (Tara, Kayal, Mitran, Agan, Mathi)
         from app.services.agent_service import AgentService
         await AgentService.provision_default_agents(workspace_id)
 

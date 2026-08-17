@@ -84,7 +84,7 @@ export default function MemoryPage() {
       title: newTitle.trim(),
       detail: newDetail.trim(),
       type: newType,
-      agent: "Nova",
+      agent: "Tara",
       protected: false,
     });
   };

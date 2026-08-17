@@ -19,7 +19,7 @@ class AgentBase(BaseModel):
     purpose: str
     avatar_gradient: Optional[str] = "from-[#2F6BFF] to-[#8B7CF6]"
     initials: Optional[str] = "AI"
-    status: str = "active"  # "active" | "training" | "paused"
+    status: str = "active"  # "active" | "paused"
     capabilities: List[str] = Field(default_factory=list)
     channels: List[str] = Field(default_factory=list)
     personality: Optional[str] = None

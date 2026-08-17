@@ -16,6 +16,7 @@ import {
   X,
   BrainCircuit,
   AudioLines,
+  Trash2,
 } from "lucide-react";
 import { apiClient } from "../lib/apiClient";
 import { appRoute } from "../lib/routes";
@@ -29,6 +30,7 @@ export default function AgentWorkspace() {
   const queryClient = useQueryClient();
   const [tab, setTab] = useState("Overview");
   const [isEditOpen, setIsEditOpen] = useState(false);
+  const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
 
   // Query Agent
   const { data: agent, isLoading } = useQuery({
@@ -44,6 +46,15 @@ export default function AgentWorkspace() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["agent", id] });
       queryClient.invalidateQueries({ queryKey: ["agents"] });
+    },
+  });
+
+  // Delete Agent Mutation
+  const deleteAgentMutation = useMutation({
+    mutationFn: () => apiClient.delete<any>(`/api/agents/${id}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["agents"] });
+      navigate(appRoute("/agents"));
     },
   });
 
@@ -95,11 +106,43 @@ export default function AgentWorkspace() {
           >
             {agent.status === "active" ? "Pause" : "Activate"}
           </Button>
+          <Button
+            variant="outline"
+            onClick={() => setIsDeleteConfirmOpen(true)}
+            className="text-rose-500 hover:text-rose-600 hover:border-rose-500/30"
+            icon={<Trash2 size={14} />}
+          >
+            Delete
+          </Button>
           <Button icon={<Sparkles size={14} />} onClick={() => navigate(appRoute("/testing"))}>
             Test Agent
           </Button>
         </div>
       </div>
+
+      {/* Delete Agent Modal */}
+      {isDeleteConfirmOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4">
+          <div className="w-full max-w-md bg-surface border border-line rounded-2xl p-6 space-y-4 shadow-soft-lg animate-scale-in">
+            <h3 className="text-[17px] font-semibold text-ink">Delete {agent.name}?</h3>
+            <p className="text-[13.5px] text-ink-soft leading-relaxed">
+              This will permanently remove this AI agent and its configuration. Historical conversations and analytics will remain safe.
+            </p>
+            <div className="pt-2 flex justify-end gap-3">
+              <Button variant="outline" onClick={() => setIsDeleteConfirmOpen(false)}>
+                Cancel
+              </Button>
+              <Button
+                className="bg-rose-600 hover:bg-rose-700 text-white border-transparent"
+                disabled={deleteAgentMutation.isPending}
+                onClick={() => deleteAgentMutation.mutate()}
+              >
+                {deleteAgentMutation.isPending ? "Deleting..." : "Delete agent"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="flex gap-1 overflow-x-auto border-b border-line scrollbar-none">
         {tabs.map((t) => (
@@ -137,6 +180,7 @@ export default function AgentWorkspace() {
 }
 
 function Overview({ agent }: { agent: any }) {
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   
   // Overrides editing state
@@ -289,71 +333,98 @@ function Overview({ agent }: { agent: any }) {
           <h3 className="mb-4 flex items-center gap-2 text-[14px] font-semibold text-ink">
             <Sparkles size={15} className="text-violet" /> Personality
           </h3>
-          <p className="text-[14px] leading-relaxed text-ink-soft">{agent.personality || "No personality attributes registered."}</p>
+          <p className="text-[14px] leading-relaxed text-ink-soft">{agent.personality || "Not configured"}</p>
         </Panel>
 
         <Panel>
           <h3 className="mb-4 flex items-center gap-2 text-[14px] font-semibold text-ink">
             <Target size={15} className="text-accent" /> Role &amp; Goals
           </h3>
-          <p className="mb-4 text-[14px] leading-relaxed text-ink-soft">{agent.role || "No specific roles summary loaded."}</p>
-          <ul className="space-y-2.5">
-            {agent.goals?.map((g: string) => (
-              <li key={g} className="flex items-start gap-2.5 text-[13.5px] text-ink">
-                <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-accent" />
-                {g}
-              </li>
-            )) || <li>No goals mapped.</li>}
-          </ul>
+          <p className="mb-4 text-[14px] leading-relaxed text-ink-soft">{agent.role || "Not configured"}</p>
+          {agent.goals && agent.goals.length > 0 ? (
+            <ul className="space-y-2.5">
+              {agent.goals.map((g: string) => (
+                <li key={g} className="flex items-start gap-2.5 text-[13.5px] text-ink">
+                  <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-accent" />
+                  {g}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-[13px] text-ink-faint">No goals configured</p>
+          )}
         </Panel>
-
 
         <Panel>
           <h3 className="mb-4 flex items-center gap-2 text-[14px] font-semibold text-ink">
             <Wrench size={15} className="text-emerald" /> Capabilities
           </h3>
-          <div className="flex flex-wrap gap-2">
-            {agent.capabilities.map((c: string) => (
-              <Badge key={c} tone="emerald">
-                {c}
-              </Badge>
-            ))}
-          </div>
+          {agent.capabilities && agent.capabilities.length > 0 ? (
+            <div className="flex flex-wrap gap-2">
+              {agent.capabilities.map((c: string) => (
+                <Badge key={c} tone="emerald">
+                  {c}
+                </Badge>
+              ))}
+            </div>
+          ) : (
+            <p className="text-[13px] text-ink-faint">No capabilities configured</p>
+          )}
         </Panel>
       </div>
 
       <div className="space-y-6">
         <Panel>
           <p className="mb-3 text-[11px] font-semibold uppercase tracking-wide text-ink-faint">Tools connected</p>
-          <div className="space-y-2">
-            {(agent.tools || []).map((t: string) => (
-              <div key={t} className="flex items-center justify-between rounded-lg bg-canvas-alt/60 px-3 py-2 text-[13px] text-ink">
-                {t}
-                <span className="h-1.5 w-1.5 rounded-full bg-emerald" />
-              </div>
-            ))}
-          </div>
+          {agent.tools && agent.tools.length > 0 ? (
+            <div className="space-y-2">
+              {agent.tools.map((t: string) => (
+                <div key={t} className="flex items-center justify-between rounded-lg bg-canvas-alt/60 px-3 py-2 text-[13px] text-ink">
+                  {t}
+                  <span className="h-1.5 w-1.5 rounded-full bg-emerald" />
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="space-y-2 text-center py-3">
+              <p className="text-[13px] text-ink-faint">No tools connected</p>
+              <button
+                onClick={() => navigate(appRoute("/integrations"))}
+                className="text-[12px] font-medium text-accent hover:underline"
+              >
+                Connect tool
+              </button>
+            </div>
+          )}
         </Panel>
 
         <Panel>
           <p className="mb-3 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
             <BookOpen size={12} /> Knowledge sources
           </p>
-          <div className="space-y-2">
-            {(agent.knowledge_sources || []).map((k: string) => (
-              <div key={k} className="text-[13px] text-ink-soft">
-                {k}
-              </div>
-            ))}
-          </div>
+          {agent.knowledge_sources && agent.knowledge_sources.length > 0 ? (
+            <div className="space-y-2">
+              {agent.knowledge_sources.map((k: string) => (
+                <div key={k} className="text-[13px] text-ink-soft">
+                  {k}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="space-y-2 text-center py-3">
+              <p className="text-[13px] text-ink-faint">No knowledge sources added</p>
+            </div>
+          )}
         </Panel>
 
-        <Panel className="bg-violet-soft/40">
-          <p className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-violet">
-            <TrendingUp size={12} /> Recent improvement
-          </p>
-          <p className="text-[13.5px] leading-relaxed text-ink">{agent.recent_improvement}</p>
-        </Panel>
+        {agent.recent_improvement && (
+          <Panel className="bg-violet-soft/40">
+            <p className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-violet">
+              <TrendingUp size={12} /> Recent improvement
+            </p>
+            <p className="text-[13.5px] leading-relaxed text-ink">{agent.recent_improvement}</p>
+          </Panel>
+        )}
       </div>
     </div>
   );
@@ -880,7 +951,7 @@ function EditAgentDrawer({
             <input
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. Nova"
+              placeholder="e.g. Tara"
               required
               className="w-full rounded-2xl border border-line bg-canvas-alt/30 px-4 py-3 text-[14px] text-ink focus:outline-none"
             />
