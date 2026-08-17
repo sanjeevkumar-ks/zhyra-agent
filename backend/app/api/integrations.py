@@ -60,6 +60,26 @@ async def connect_integration(
         log_error(f"Failed to connect integration {integration_id}", exc=e)
         return JSONResponse(status_code=500, content={"detail": f"Failed to connect integration: {str(e)}"})
 
+@router.post("/{integration_id}/test")
+async def test_integration_credentials(
+    integration_id: str,
+    payload: IntegrationConnectRequest,
+    workspace_id: str = Depends(get_user_workspace_id)
+):
+    """Tests connection credentials against the provider API before connecting."""
+    try:
+        provider = IntegrationService._get_provider(integration_id)
+        config = payload.configuration or {}
+        credentials = payload.credentials or {}
+        is_valid = await provider.validate(config, credentials)
+        return {"success": True, "valid": is_valid, "message": "Credentials verified successfully."}
+    except HTTPException as e:
+        return JSONResponse(status_code=e.status_code, content={"success": False, "detail": e.detail})
+    except Exception as e:
+        from app.utils.logger import log_error
+        log_error(f"Failed to test integration credentials for {integration_id}", exc=e)
+        return JSONResponse(status_code=400, content={"success": False, "detail": f"Credential verification failed: {str(e)}"})
+
 @router.delete("/{integration_id}")
 async def disconnect_integration(
     integration_id: str,

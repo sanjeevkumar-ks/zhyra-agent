@@ -96,15 +96,29 @@ class ElevenLabsProvider(BaseIntegrationProvider):
                     headers={"xi-api-key": api_key},
                 )
                 if r.status_code == 401:
-                    raise HTTPException(status_code=400, detail="Invalid ElevenLabs API Key. Please verify your API key from ElevenLabs dashboard.")
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Invalid ElevenLabs API Key. Please double check your key from the ElevenLabs dashboard (Profile > API Keys)."
+                    )
                 if r.status_code not in (200, 201):
-                    raise HTTPException(status_code=400, detail=f"ElevenLabs validation failed: {r.text[:200]}")
+                    detail_msg = f"ElevenLabs API returned status {r.status_code}"
+                    try:
+                        err_json = r.json()
+                        if "detail" in err_json:
+                            detail_msg = err_json["detail"].get("message") or str(err_json["detail"])
+                    except Exception:
+                        detail_msg = r.text[:150]
+                    raise HTTPException(status_code=400, detail=f"ElevenLabs key validation failed: {detail_msg}")
             return True
         except HTTPException:
             raise
+        except httpx.ConnectError:
+            raise HTTPException(status_code=400, detail="Could not reach ElevenLabs server. Please check your internet connection.")
+        except httpx.TimeoutException:
+            raise HTTPException(status_code=400, detail="ElevenLabs API request timed out. Please try again.")
         except Exception as e:
-            log_error("ElevenLabs validation failed", exc=e)
-            raise HTTPException(status_code=400, detail=f"Could not connect to ElevenLabs: {str(e)}")
+            log_error("ElevenLabs validation error", exc=e)
+            raise HTTPException(status_code=400, detail=f"ElevenLabs API key verification failed: {str(e)}")
 
     async def refresh(self, workspace_id: str) -> dict:
         # API keys don't expire

@@ -314,6 +314,39 @@ export default function Integrations() {
     },
   });
 
+  const testMutation = useMutation({
+    mutationFn: ({
+      integrationId,
+      payload,
+    }: {
+      integrationId: string;
+      payload: {
+        credentials: Record<string, unknown>;
+        configuration?: Record<string, unknown>;
+      };
+    }) => apiClient.post<{ success: boolean; valid: boolean; message?: string; detail?: string }>(`/api/integrations/${integrationId}/test`, payload),
+    onSuccess: (data) => {
+      if (data.valid || data.success) {
+        setToast("✓ API Key verified successfully!");
+      } else {
+        setToast(data.detail || "API Key verification failed");
+      }
+    },
+    onError: (err: any) => {
+      setToast(err?.detail || err?.message || "API Key verification failed");
+    },
+  });
+
+  async function testSelectedIntegration() {
+    if (!selected) return;
+    const configuration = selected.id === "int_rest_api" ? { ...restApiForm } : draftConfig;
+    const payload = {
+      credentials: buildCredentials(selected.id, configuration),
+      configuration,
+    };
+    testMutation.mutate({ integrationId: selected.id, payload });
+  }
+
   const disconnectMutation = useMutation({
     mutationFn: (integrationId: string) => apiClient.delete<{ detail: string }>(`/api/integrations/${integrationId}`),
     onSuccess: () => {
@@ -751,10 +784,21 @@ export default function Integrations() {
                 </div>
 
                 <div className="flex flex-col gap-2 border-t border-line pt-6">
+                  {(!selected.connected || selectedMeta?.authType === "api_key" || selectedMeta?.authType === "bearer_token") && (
+                    <Button
+                      variant="outline"
+                      className="w-full justify-center"
+                      onClick={testSelectedIntegration}
+                      disabled={testMutation.isPending || connectMutation.isPending}
+                      icon={<Sparkles size={14} className="text-violet" />}
+                    >
+                      {testMutation.isPending ? "Verifying Key..." : "Test Connection Key"}
+                    </Button>
+                  )}
                   <Button
                     className="w-full justify-center"
                     onClick={() => saveSelectedIntegration(selected.connected ? "save" : "connect")}
-                    disabled={connectMutation.isPending}
+                    disabled={connectMutation.isPending || testMutation.isPending}
                     icon={selected.connected ? <Check size={14} /> : <ExternalLink size={14} />}
                   >
                     {connectMutation.isPending
