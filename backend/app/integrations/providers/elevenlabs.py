@@ -301,5 +301,96 @@ class ElevenLabsProvider(BaseIntegrationProvider):
         ]
         return f"ElevenLabs History ({len(formatted)} items):\n{json.dumps(formatted, indent=2)}"
 
+    async def fetch_voices(self, api_key: str) -> list:
+        import httpx
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            r = await client.get(
+                "https://api.elevenlabs.io/v1/voices",
+                headers={"xi-api-key": api_key},
+            )
+        if r.status_code != 200:
+            raise HTTPException(status_code=r.status_code, detail=f"ElevenLabs error: {r.text[:200]}")
+
+        voices = r.json().get("voices", [])
+        return [
+            {
+                "id": v.get("voice_id"),
+                "voice_id": v.get("voice_id"),
+                "name": v.get("name"),
+                "category": v.get("category", "general"),
+                "description": v.get("description") or f"{v.get('category', 'ElevenLabs').capitalize()} voice",
+                "preview_url": v.get("preview_url", ""),
+                "labels": v.get("labels", {}),
+                "language": v.get("labels", {}).get("accent") or v.get("labels", {}).get("language") or "English",
+                "style": v.get("labels", {}).get("use_case") or v.get("category", "General"),
+                "provider": "ElevenLabs",
+                "is_custom": v.get("category") in ["cloned", "custom", "generated"],
+            }
+            for v in voices
+        ]
+
+    async def generate_tts_audio(
+        self,
+        api_key: str,
+        text: str,
+        voice_id: str = "21m00Tcm4TlvDq8ikWAM",
+        stability: float = 0.5,
+        similarity_boost: float = 0.8
+    ) -> bytes:
+        import httpx
+        url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
+        payload = {
+            "text": text,
+            "model_id": "eleven_multilingual_v2",
+            "voice_settings": {
+                "stability": stability,
+                "similarity_boost": similarity_boost,
+            },
+        }
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            r = await client.post(
+                url,
+                json=payload,
+                params={"output_format": "mp3_44100_128"},
+                headers={
+                    "xi-api-key": api_key,
+                    "Content-Type": "application/json",
+                },
+            )
+        if r.status_code != 200:
+            raise HTTPException(status_code=r.status_code, detail=f"ElevenLabs TTS failed: {r.text[:200]}")
+        return r.content
+
+    async def clone_voice_from_file(
+        self,
+        api_key: str,
+        name: str,
+        description: str,
+        files: list
+    ) -> dict:
+        import httpx
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            r = await client.post(
+                "https://api.elevenlabs.io/v1/voices/add",
+                headers={"xi-api-key": api_key},
+                data={"name": name, "description": description},
+                files=files,
+            )
+        if r.status_code not in (200, 201):
+            raise HTTPException(status_code=r.status_code, detail=f"ElevenLabs voice cloning failed: {r.text[:200]}")
+        return r.json()
+
+    async def delete_voice_by_id(self, api_key: str, voice_id: str) -> bool:
+        import httpx
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            r = await client.delete(
+                f"https://api.elevenlabs.io/v1/voices/{voice_id}",
+                headers={"xi-api-key": api_key},
+            )
+        if r.status_code not in (200, 204):
+            raise HTTPException(status_code=r.status_code, detail=f"ElevenLabs voice deletion failed: {r.text[:200]}")
+        return True
+
     def capabilities(self) -> list:
         return ["Generate speech", "Browse voices", "Clone voices", "Stream audio"]
+

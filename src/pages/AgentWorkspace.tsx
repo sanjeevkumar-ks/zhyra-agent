@@ -15,6 +15,7 @@ import {
   Settings as SettingsIcon,
   X,
   BrainCircuit,
+  AudioLines,
 } from "lucide-react";
 import { apiClient } from "../lib/apiClient";
 import { appRoute } from "../lib/routes";
@@ -280,6 +281,9 @@ function Overview({ agent }: { agent: any }) {
             </Button>
           </div>
         </Panel>
+
+        {/* Voice Configuration Panel */}
+        <VoiceConfigPanel agent={agent} />
 
         <Panel>
           <h3 className="mb-4 flex items-center gap-2 text-[14px] font-semibold text-ink">
@@ -991,5 +995,118 @@ function EditAgentDrawer({
         </div>
       </form>
     </div>
+  );
+}
+
+function VoiceConfigPanel({ agent }: { agent: any }) {
+  const queryClient = useQueryClient();
+  const navigate = useNavigate();
+
+  const { data: voiceStatus } = useQuery({
+    queryKey: ["voice-status"],
+    queryFn: () => apiClient.get<{ connected: boolean }>("/api/voice/status"),
+  });
+
+  const isConnected = voiceStatus?.connected ?? false;
+
+  const { data: voices = [] } = useQuery({
+    queryKey: ["voices"],
+    queryFn: () => apiClient.get<any[]>("/api/voice/voices"),
+    enabled: isConnected,
+  });
+
+  const currentVoiceConfig = agent.voice_config || {};
+  const [enabled, setEnabled] = useState<boolean>(currentVoiceConfig.enabled ?? false);
+  const [selectedVoiceId, setSelectedVoiceId] = useState<string>(
+    currentVoiceConfig.voice_id || agent.voice_id || ""
+  );
+  const [saving, setSaving] = useState(false);
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      const selectedVoice = voices.find((v: any) => v.id === selectedVoiceId);
+      await apiClient.put(`/api/agents/${agent.id}`, {
+        voice_config: {
+          enabled: isConnected && enabled && !!selectedVoiceId,
+          provider: "elevenlabs",
+          voice_id: selectedVoiceId || null,
+          voice_name: selectedVoice?.name || "ElevenLabs Voice",
+        },
+        voice_id: selectedVoiceId || null,
+      });
+      queryClient.invalidateQueries({ queryKey: ["agent", agent.id] });
+    } catch (e) {
+      console.error("Failed to save agent voice configuration", e);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Panel>
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="flex items-center gap-2 text-[14.5px] font-semibold text-ink">
+          <AudioLines size={16} className="text-violet" /> Voice Configuration
+        </h3>
+        <span className={`px-2.5 py-0.5 rounded-full text-xs font-semibold ${
+          isConnected ? "bg-emerald-100 text-emerald-700" : "bg-canvas-alt text-ink-faint"
+        }`}>
+          {isConnected ? "ElevenLabs Connected" : "Provider Disconnected"}
+        </span>
+      </div>
+
+      {!isConnected ? (
+        <div className="rounded-xl border border-line bg-canvas-alt/50 p-4 text-center space-y-3">
+          <p className="text-[13px] text-ink-soft">
+            Connect a voice provider and select a voice to enable voice capabilities for this agent.
+          </p>
+          <Button variant="outline" size="sm" onClick={() => navigate(appRoute("/integrations"))}>
+            Connect ElevenLabs Provider
+          </Button>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between rounded-xl border border-line/70 bg-canvas-alt/40 p-3.5">
+            <div>
+              <p className="text-[13px] font-medium text-ink">Enable Voice Agent</p>
+              <p className="text-[11.5px] text-ink-faint">Allow this agent to participate in realtime voice conversations.</p>
+            </div>
+            <input
+              type="checkbox"
+              checked={enabled}
+              disabled={!selectedVoiceId}
+              onChange={(e) => setEnabled(e.target.checked)}
+              className="h-4 w-4 rounded border-line text-ink focus:ring-0 cursor-pointer"
+            />
+          </div>
+
+          <div className="space-y-1">
+            <label className="text-[11.5px] text-ink-faint">Selected ElevenLabs Voice</label>
+            <select
+              value={selectedVoiceId}
+              onChange={(e) => {
+                setSelectedVoiceId(e.target.value);
+                if (!e.target.value) setEnabled(false);
+              }}
+              className="w-full rounded-xl border border-line bg-canvas-alt/40 px-3 py-2.5 text-[13px] text-ink focus:outline-none"
+            >
+              <option value="">Select a Voice...</option>
+              {voices.map((v: any) => (
+                <option key={v.id} value={v.id}>
+                  {v.name} ({v.category} — {v.language || "English"})
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="flex justify-end pt-2">
+            <Button size="sm" onClick={handleSave} disabled={saving}>
+              {saving ? "Saving..." : "Save Voice Config"}
+            </Button>
+          </div>
+        </div>
+      )}
+    </Panel>
   );
 }

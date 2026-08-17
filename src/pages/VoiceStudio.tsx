@@ -1,1194 +1,699 @@
-import { useEffect, useMemo, useState } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
+import { useNavigate } from "react-router-dom";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   AudioLines,
   Check,
-  ChevronDown,
-  ChevronsUpDown,
-  Globe2,
-  Languages,
-  MoreHorizontal,
-  Pause,
   Play,
+  Pause,
+  Plus,
   Search,
-  Settings2,
-  SlidersHorizontal,
   Sparkles,
   Upload,
-  WandSparkles,
+  Trash2,
+  Mic,
+  MicOff,
+  Volume2,
+  Wrench,
+  Bot,
+  AlertCircle,
   X,
+  ExternalLink,
 } from "lucide-react";
 import { apiClient } from "../lib/apiClient";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { AskZhyraChip, Badge, Button, EmptyState, PageHeader, Panel, Skeleton } from "../components/ui";
+import { appRoute } from "../lib/routes";
+import { Badge, Button, EmptyState, PageHeader, Panel } from "../components/ui";
 import { cn } from "../utils/cn";
 
-type VoiceSection = "library" | "create" | "test" | "settings";
-type CreateTab = "create" | "clone";
-
-interface VoiceItem {
+interface Voice {
   id: string;
+  voice_id: string;
   name: string;
+  category: string;
   description: string;
+  preview_url: string;
+  labels: Record<string, string>;
   language: string;
-  languages: string[];
   style: string;
   provider: string;
-  assignedAgentIds: string[];
-  baseVoice: string;
+  is_custom: boolean;
 }
 
-const sections: Array<{ key: VoiceSection; label: string }> = [
-  { key: "library", label: "Library" },
-  { key: "create", label: "Create" },
-  { key: "test", label: "Test" },
-  { key: "settings", label: "Settings" },
-];
-
-const voiceSeed: VoiceItem[] = [
-  {
-    id: "voice-nova",
-    name: "North Star",
-    description: "Warm, unhurried support voice for high-trust service moments.",
-    language: "English (US)",
-    languages: ["English (US)", "English (UK)"],
-    style: "Friendly support",
-    provider: "ElevenLabs",
-    assignedAgentIds: ["agt-nova"],
-    baseVoice: "Clara",
-  },
-  {
-    id: "voice-auric",
-    name: "Auric",
-    description: "Refined concierge tone with soft confidence and precise pacing.",
-    language: "English (UK)",
-    languages: ["English (UK)", "French"],
-    style: "Luxury concierge",
-    provider: "Zhyra Voice",
-    assignedAgentIds: ["agt-orion"],
-    baseVoice: "Jasper",
-  },
-  {
-    id: "voice-haven",
-    name: "Haven",
-    description: "Calm, reassuring delivery built for healthcare and sensitive care journeys.",
-    language: "English (US)",
-    languages: ["English (US)", "Spanish"],
-    style: "Calm healthcare",
-    provider: "ElevenLabs",
-    assignedAgentIds: ["agt-sage"],
-    baseVoice: "Maya",
-  },
-  {
-    id: "voice-vector",
-    name: "Vector",
-    description: "Professional sales voice with crisp articulation and light energy.",
-    language: "English (US)",
-    languages: ["English (US)", "German"],
-    style: "Professional sales",
-    provider: "Zhyra Voice",
-    assignedAgentIds: ["agt-zhyra-sales"],
-    baseVoice: "Theo",
-  },
-  {
-    id: "voice-drift",
-    name: "Drift",
-    description: "Neutral operational voice for updates, order tracking, and logistics.",
-    language: "English (US)",
-    languages: ["English (US)"],
-    style: "Operations",
-    provider: "OpenAI Voice",
-    assignedAgentIds: ["agt-relay"],
-    baseVoice: "Avery",
-  },
-];
-
-const baseVoices = ["Clara", "Jasper", "Maya", "Theo", "Avery"];
-
-const scenarios = [
-  {
-    id: "support",
-    label: "Customer Support",
-    assignedAgent: "Nova",
-    responseTime: "1.2s",
-    language: "English (US)",
-    lines: [
-      { from: "Customer", text: "My invoice still shows the old plan price." },
-      { from: "Agent", text: "I can fix that for you. I’m reviewing your last billing change now." },
-      { from: "Customer", text: "Please make sure next month is correct too." },
-      { from: "Agent", text: "Done. Your renewal is now aligned to the Growth plan going forward." },
-    ],
-  },
-  {
-    id: "booking",
-    label: "Appointment Booking",
-    assignedAgent: "Orion",
-    responseTime: "900ms",
-    language: "English (UK)",
-    lines: [
-      { from: "Customer", text: "Can you move me to an earlier slot on Wednesday?" },
-      { from: "Agent", text: "Absolutely. I can offer 10:15 or 11:30 that morning." },
-      { from: "Customer", text: "Let’s do 10:15." },
-      { from: "Agent", text: "You’re confirmed for Wednesday at 10:15. I’ve sent an update by SMS." },
-    ],
-  },
-  {
-    id: "restaurant",
-    label: "Restaurant Order",
-    assignedAgent: "Halo",
-    responseTime: "1.4s",
-    language: "English (US)",
-    lines: [
-      { from: "Customer", text: "Can I add a side salad to the order I just placed?" },
-      { from: "Agent", text: "Yes. I can add that now before the kitchen starts prep." },
-      { from: "Customer", text: "Perfect, thanks." },
-      { from: "Agent", text: "Done. Your updated total is ready whenever you are." },
-    ],
-  },
-];
-
 export default function VoiceStudio() {
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
+
+  // Check ElevenLabs connection status
+  const { data: statusData, isLoading: statusLoading } = useQuery({
+    queryKey: ["voice-status"],
+    queryFn: () => apiClient.get<{ connected: boolean; provider: string; connected_account?: string }>("/api/voice/status"),
+  });
+
+  const isConnected = statusData?.connected ?? false;
+
+  // Fetch real voices if connected
+  const { data: rawVoices = [], isLoading: voicesLoading, refetch: refetchVoices } = useQuery({
+    queryKey: ["voices"],
+    queryFn: () => apiClient.get<Voice[]>("/api/voice/voices"),
+    enabled: isConnected,
+  });
+
+  // Fetch workspace agents for voice assignment
   const { data: agents = [] } = useQuery({
     queryKey: ["agents"],
     queryFn: () => apiClient.get<any[]>("/api/agents"),
   });
-  
-  const { data: dbVoices = [] } = useQuery({
-    queryKey: ["voices"],
-    queryFn: () => apiClient.get<any[]>("/api/voice/voices"),
-  });
 
-  const [section, setSection] = useState<VoiceSection>("library");
-  const [createTab, setCreateTab] = useState<CreateTab>("create");
-  const [query, setQuery] = useState("");
-  const [selectedVoiceId, setSelectedVoiceId] = useState<string | null>(null);
-  const [loadingLibrary, setLoadingLibrary] = useState(true);
-  const [hoveredVoiceId, setHoveredVoiceId] = useState<string | null>(null);
-  const [assignmentOpen, setAssignmentOpen] = useState(false);
-  const [assignmentQuery, setAssignmentQuery] = useState("");
-  const [playbackVoiceId, setPlaybackVoiceId] = useState<string | null>(null);
-  const [testVoiceId, setTestVoiceId] = useState<string>("");
-  const [scenarioId, setScenarioId] = useState(scenarios[0].id);
-  const [conversationPlaying, setConversationPlaying] = useState(false);
-  const [autosaveTick, setAutosaveTick] = useState("Saved just now");
-  const [createForm, setCreateForm] = useState({
-    name: "North Star II",
-    baseVoice: "Clara",
-    speakingSpeed: 48,
-    warmth: 62,
-    energy: 44,
-  });
-  const [cloneProgress, setCloneProgress] = useState(72);
+  // UI States
+  const [tab, setTab] = useState<"library" | "clone" | "session">("library");
+  const [search, setSearch] = useState("");
+  const [playingVoiceId, setPlayingVoiceId] = useState<string | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
 
-  // Compile final voices feed by merging predefined seeds with custom user voices
-  const voices = useMemo(() => {
-    const dbMapped: VoiceItem[] = dbVoices.map((v: any) => ({
-      id: v.id,
-      name: v.name,
-      description: v.description || "Synthesized speech profile.",
-      language: v.language || "English (US)",
-      languages: v.languages || ["English (US)"],
-      style: v.style || "Friendly support",
-      provider: v.provider || "Zhyra Voice",
-      assignedAgentIds: v.assignedAgentIds || agents.filter((a: any) => a.voice_id === v.id).map((a: any) => a.id) || [],
-      baseVoice: v.baseVoice || "Clara",
-    }));
+  // Clone voice state
+  const [cloneName, setCloneName] = useState("");
+  const [cloneDesc, setCloneDesc] = useState("");
+  const [cloneFile, setCloneFile] = useState<File | null>(null);
+  const [confirmPermission, setConfirmPermission] = useState(false);
+  const [cloneError, setCloneError] = useState("");
 
-    const updatedSeeds = voiceSeed.map((seed) => {
-      const assigned = agents.filter((a: any) => a.voice_id === seed.id).map((a: any) => a.id);
-      return {
-        ...seed,
-        assignedAgentIds: Array.from(new Set([...seed.assignedAgentIds, ...assigned])),
-      };
-    });
+  // Assign voice state
+  const [assignVoice, setAssignVoice] = useState<Voice | null>(null);
+  const [selectedAgentId, setSelectedAgentId] = useState("");
+  const [assignSuccess, setAssignSuccess] = useState(false);
 
-    return [...updatedSeeds, ...dbMapped];
-  }, [dbVoices, agents]);
+  // Realtime Voice Session state
+  const [sessionAgentId, setSessionAgentId] = useState("");
+  const [sessionActive, setSessionActive] = useState(false);
+  const [sessionState, setSessionState] = useState<"IDLE" | "CONNECTED" | "LISTENING" | "THINKING" | "TOOL_EXECUTION" | "SPEAKING" | "ERROR">("IDLE");
+  const [sessionEvents, setSessionEvents] = useState<string[]>([]);
+  const [userSpeechInput, setUserSpeechInput] = useState("");
+  const [activeActions, setActiveActions] = useState<string[]>([]);
+  const wsRef = useRef<WebSocket | null>(null);
 
+  // Cleanup audio playback on unmount
   useEffect(() => {
-    if (voices.length > 0) {
-      if (!testVoiceId) setTestVoiceId(voices[0].id);
-    }
-  }, [voices, testVoiceId]);
-
-  useEffect(() => {
-    const timer = window.setTimeout(() => setLoadingLibrary(false), 500);
-    return () => window.clearTimeout(timer);
+    return () => {
+      if (audioRef.current) {
+        audioRef.current.pause();
+      }
+      if (wsRef.current) {
+        wsRef.current.close();
+      }
+    };
   }, []);
 
-  useEffect(() => {
-    const timer = window.setTimeout(() => setAutosaveTick("Autosaved 3s ago"), 1200);
-    return () => window.clearTimeout(timer);
-  }, [createForm]);
+  // Filter voices
+  const filteredVoices = useMemo(() => {
+    if (!search) return rawVoices;
+    const q = search.toLowerCase();
+    return rawVoices.filter(
+      (v) =>
+        v.name.toLowerCase().includes(q) ||
+        (v.description && v.description.toLowerCase().includes(q)) ||
+        (v.category && v.category.toLowerCase().includes(q))
+    );
+  }, [rawVoices, search]);
 
-  useEffect(() => {
-    function onKeyDown(event: KeyboardEvent) {
-      const target = event.target as HTMLElement | null;
-      const isTyping =
-        target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target?.isContentEditable;
-
-      if (event.code === "Space" && !isTyping && section === "test") {
-        event.preventDefault();
-        setConversationPlaying((value) => !value);
+  // Preview Voice Audio
+  const handleTogglePreview = async (voice: Voice) => {
+    if (playingVoiceId === voice.id) {
+      if (audioRef.current) {
+        audioRef.current.pause();
       }
-
-      if (event.key.toLowerCase() === "r" && !isTyping && section === "test") {
-        setConversationPlaying(true);
-      }
+      setPlayingVoiceId(null);
+      return;
     }
 
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [section]);
+    setPlayingVoiceId(voice.id);
 
-  const selectedVoice = voices.find((voice) => voice.id === selectedVoiceId) ?? voices[0] ?? voiceSeed[0];
-  const activeScenario = scenarios.find((scenario) => scenario.id === scenarioId) ?? scenarios[0];
-  const testVoice = voices.find((voice) => voice.id === testVoiceId) ?? voices[0] ?? voiceSeed[0];
+    try {
+      if (voice.preview_url) {
+        if (audioRef.current) audioRef.current.pause();
+        const audio = new Audio(voice.preview_url);
+        audioRef.current = audio;
+        audio.onended = () => setPlayingVoiceId(null);
+        await audio.play();
+      } else {
+        // Fetch generated preview audio from backend
+        const res = await fetch("/api/voice/preview", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ voice_id: voice.id, text: `Hello! This is a preview of ${voice.name}.` }),
+        });
+        if (!res.ok) throw new Error("Failed to generate preview audio");
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        if (audioRef.current) audioRef.current.pause();
+        const audio = new Audio(url);
+        audioRef.current = audio;
+        audio.onended = () => setPlayingVoiceId(null);
+        await audio.play();
+      }
+    } catch (e) {
+      console.error("Preview playback failed", e);
+      setPlayingVoiceId(null);
+    }
+  };
 
-  const filteredVoices = useMemo(() => {
-    const normalized = query.trim().toLowerCase();
-    if (!normalized) return voices;
-    return voices.filter((voice) =>
-      [voice.name, voice.description, voice.style, voice.language].some((value) => value.toLowerCase().includes(normalized)),
-    );
-  }, [query, voices]);
+  // Clone Voice Mutation
+  const cloneMutation = useMutation({
+    mutationFn: async () => {
+      if (!cloneFile) throw new Error("Please select an audio sample file.");
+      if (!confirmPermission) throw new Error("Explicit permission confirmation is required.");
 
-  const filteredAgents = useMemo(() => {
-    const normalized = assignmentQuery.trim().toLowerCase();
-    return agents.filter((agent) => {
-      const currentVoice = voices.find((voice) => voice.assignedAgentIds.includes(agent.id))?.name ?? "Not assigned";
-      return [agent.name, currentVoice].some((value) => value.toLowerCase().includes(normalized));
-    });
-  }, [assignmentQuery, voices, agents]);
+      const formData = new FormData();
+      formData.append("name", cloneName);
+      formData.append("description", cloneDesc);
+      formData.append("confirm_permission", "true");
+      formData.append("sample_file", cloneFile);
 
-  function togglePreview(voiceId: string) {
-    setPlaybackVoiceId((current) => (current === voiceId ? null : voiceId));
-  }
+      const res = await fetch("/api/voice/voices/clone", {
+        method: "POST",
+        body: formData,
+      });
 
-  // Mutations to save created voice
-  const createVoiceMutation = useMutation({
-    mutationFn: (payload: any) => apiClient.post("/api/voice/voices", payload),
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.detail || "Failed to clone voice.");
+      }
+      return res.json();
+    },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["voices"] });
-      setSection("library");
+      setCloneName("");
+      setCloneDesc("");
+      setCloneFile(null);
+      setConfirmPermission(false);
+      setCloneError("");
+      refetchVoices();
+      setTab("library");
+    },
+    onError: (err: any) => {
+      setCloneError(err.message || "Failed to clone voice.");
     },
   });
 
-  const handleCreateVoiceSave = () => {
-    createVoiceMutation.mutate({
-      name: createForm.name,
-      provider: "Zhyra Voice",
-      gender: "Female",
-      description: `Synthesized speed speed:${createForm.speakingSpeed}% warmth:${createForm.warmth}% energy:${createForm.energy}%`,
-      is_custom: true,
-    });
-  };
-
-  // Mutation to save cloned voice
-  const cloneVoiceMutation = useMutation({
-    mutationFn: (payload: any) => apiClient.post("/api/voice/voices/clone", payload),
+  // Delete Voice Mutation
+  const deleteMutation = useMutation({
+    mutationFn: (voiceId: string) => apiClient.delete(`/api/voice/voices/${voiceId}`),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["voices"] });
-      setSection("library");
+      refetchVoices();
     },
   });
 
-  const handleCloneVoiceSave = () => {
-    cloneVoiceMutation.mutate({
-      name: "Auric Custom Clone",
-      sample_file_url: "/api/static/samples/auric_clone.mp3",
-      provider: "ElevenLabs",
-    });
-  };
-
-  // Mutation to assign voice to agent
-  const assignVoiceMutation = useMutation({
-    mutationFn: ({ agentId, voiceId }: { agentId: string; voiceId: string }) =>
-      apiClient.put(`/api/agents/${agentId}`, { voice_id: voiceId }),
+  // Assign Voice Mutation
+  const assignMutation = useMutation({
+    mutationFn: async ({ agentId, voice }: { agentId: string; voice: Voice }) => {
+      return apiClient.put(`/api/agents/${agentId}`, {
+        voice_config: {
+          enabled: true,
+          provider: "elevenlabs",
+          voice_id: voice.id,
+          voice_name: voice.name,
+          language: voice.language || "English (US)",
+        },
+        voice_id: voice.id,
+      });
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["agents"] });
-      queryClient.invalidateQueries({ queryKey: ["voices"] });
-      setAssignmentOpen(false);
+      setAssignSuccess(true);
+      setTimeout(() => {
+        setAssignSuccess(false);
+        setAssignVoice(null);
+      }, 1500);
     },
   });
 
-  function assignVoice(agentId: string) {
-    if (!selectedVoice) return;
-    assignVoiceMutation.mutate({ agentId, voiceId: selectedVoice.id });
-  }
+  // Realtime Session Execution
+  const startRealtimeSession = async () => {
+    if (!sessionAgentId) return;
 
-  function duplicateVoice() {
-    if (!selectedVoice) return;
-    createVoiceMutation.mutate({
-      name: `${selectedVoice.name} Copy`,
-      provider: selectedVoice.provider,
-      gender: "Female",
-      description: `Duplicated from ${selectedVoice.name}`,
-      is_custom: true,
-    });
+    try {
+      setSessionEvents(["Initializing session with backend..."]);
+      setSessionState("CONNECTING" as any);
+
+      const sess = await apiClient.post<{ session_id: string }>("/api/voice/session", {
+        agent_id: sessionAgentId,
+      });
+
+      const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+      const wsUrl = `${protocol}//${window.location.host}/api/voice/ws/${sess.session_id}`;
+      const ws = new WebSocket(wsUrl);
+      wsRef.current = ws;
+
+      ws.onopen = () => {
+        setSessionActive(true);
+        setSessionState("CONNECTED");
+        setSessionEvents((prev) => [...prev, "Connected to realtime voice engine."]);
+      };
+
+      ws.onmessage = (event) => {
+        const msg = JSON.parse(event.data);
+        const eventName = msg.event;
+
+        if (eventName === "session_started") {
+          setSessionState("CONNECTED");
+          setSessionEvents((prev) => [...prev, `Session started for Agent ${msg.agent_id}`]);
+        } else if (eventName === "user_started_speaking") {
+          setSessionState("LISTENING");
+        } else if (eventName === "final_transcript") {
+          setSessionEvents((prev) => [...prev, `User: "${msg.text}"`]);
+        } else if (eventName === "agent_thinking") {
+          setSessionState("THINKING");
+        } else if (eventName === "tool_execution_started") {
+          setSessionState("TOOL_EXECUTION");
+          setActiveActions(msg.actions || []);
+          setSessionEvents((prev) => [...prev, `Tool Execution: ${msg.actions?.join(", ")}`]);
+        } else if (eventName === "tool_execution_completed") {
+          setSessionState("THINKING");
+        } else if (eventName === "agent_started_speaking") {
+          setSessionState("SPEAKING");
+          setSessionEvents((prev) => [...prev, `Agent: "${msg.text}"`]);
+        } else if (eventName === "audio_chunk") {
+          // Play returned ElevenLabs audio chunk
+          const audioBytes = Uint8Array.from(atob(msg.audio_base64), (c) => c.charCodeAt(0));
+          const blob = new Blob([audioBytes], { type: "audio/mpeg" });
+          const url = URL.createObjectURL(blob);
+          const audio = new Audio(url);
+          audio.play();
+        } else if (eventName === "agent_finished_speaking") {
+          setSessionState("CONNECTED");
+        } else if (eventName === "provider_error" || eventName === "tool_error") {
+          setSessionState("ERROR");
+          setSessionEvents((prev) => [...prev, `Error: ${msg.error?.message || "Operation failed"}`]);
+        }
+      };
+
+      ws.onclose = () => {
+        setSessionActive(false);
+        setSessionState("IDLE");
+        setSessionEvents((prev) => [...prev, "Voice session ended."]);
+      };
+    } catch (e: any) {
+      console.error("Failed to start voice session", e);
+      setSessionState("ERROR");
+      setSessionEvents((prev) => [...prev, `Failed to start session: ${e.message || "Unknown error"}`]);
+    }
+  };
+
+  const sendUserSpeech = () => {
+    if (!userSpeechInput.trim() || !wsRef.current) return;
+    wsRef.current.send(
+      JSON.stringify({
+        event: "user_speech",
+        text: userSpeechInput.trim(),
+      })
+    );
+    setUserSpeechInput("");
+  };
+
+  const stopRealtimeSession = () => {
+    if (wsRef.current) {
+      wsRef.current.send(JSON.stringify({ event: "end_session" }));
+      wsRef.current.close();
+    }
+    setSessionActive(false);
+    setSessionState("IDLE");
+  };
+
+  // -------------------------------------------------------------
+  // FEATURE GATING: Render Lock Screen if ElevenLabs Disconnected
+  // -------------------------------------------------------------
+  if (!statusLoading && !isConnected) {
+    return (
+      <div className="space-y-6">
+        <PageHeader
+          title="Voice Studio"
+          description="Power your Zhyra AI agents with real ElevenLabs speech synthesis and voice cloning."
+        />
+        <div className="flex flex-col items-center justify-center rounded-2xl border border-line bg-surface p-12 text-center shadow-soft">
+          <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-violet/10 text-violet">
+            <AudioLines size={32} />
+          </div>
+          <h2 className="text-xl font-semibold text-ink">Connect ElevenLabs to Enable Voice</h2>
+          <p className="mt-2 max-w-md text-sm text-ink-soft">
+            Voice features are currently locked because no voice provider is connected. Connect your ElevenLabs account to browse voices, clone samples, and enable realtime voice agents.
+          </p>
+          <div className="mt-6">
+            <Button variant="primary" icon={<ExternalLink size={14} />} onClick={() => navigate(appRoute("/integrations"))}>
+              Connect ElevenLabs
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   return (
     <div className="space-y-8">
       <PageHeader
-        eyebrow="Voice system"
         title="Voice Studio"
-        description="Explore voices, shape custom delivery, and assign the right tone to every AI agent without breaking flow."
+        description="Browse ElevenLabs voices, clone custom samples, and assign voices to your AI agents."
         actions={
-          <>
-            <AskZhyraChip label="Recommend a voice style" />
-            <Button variant="outline" icon={<AudioLines size={15} />} onClick={() => setSection("test")}>
-              Open playground
-            </Button>
-          </>
+          <div className="flex items-center gap-2">
+            <Badge tone="emerald" className="gap-1.5 py-1 px-3">
+              <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" /> ElevenLabs Connected
+            </Badge>
+          </div>
         }
       />
 
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <div className="flex items-center gap-1 rounded-full border border-line bg-surface p-1 shadow-soft">
-          {sections.map((item) => (
-            <button
-              key={item.key}
-              onClick={() => setSection(item.key)}
-              className={cn(
-                "rounded-full px-4 py-2 text-[13px] font-medium transition-colors",
-                section === item.key ? "bg-ink text-white" : "text-ink-soft hover:text-ink",
-              )}
-            >
-              {item.label}
-            </button>
-          ))}
-        </div>
-        <p className="text-[12.5px] text-ink-faint">Voice previews: hover to listen · space to play in Test</p>
-      </div>
-
-      <AnimatePresence mode="wait">
-        <motion.div
-          key={section}
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0, y: -8 }}
-          transition={{ duration: 0.18 }}
+      {/* Tabs */}
+      <div className="flex border-b border-line">
+        <button
+          onClick={() => setTab("library")}
+          className={cn(
+            "px-5 py-3 text-[13.5px] font-medium transition-colors border-b-2 -mb-px",
+            tab === "library" ? "border-ink text-ink font-semibold" : "border-transparent text-ink-faint hover:text-ink"
+          )}
         >
-          {section === "library" && (
-            <LibrarySection
-              filteredVoices={filteredVoices}
-              hoveredVoiceId={hoveredVoiceId}
-              loading={loadingLibrary}
-              onHoverVoice={setHoveredVoiceId}
-              onOpenVoice={setSelectedVoiceId}
-              onPreview={togglePreview}
-              playbackVoiceId={playbackVoiceId}
-              query={query}
-              setAssignmentOpen={setAssignmentOpen}
-              setQuery={setQuery}
-            />
+          Voice Library ({filteredVoices.length})
+        </button>
+        <button
+          onClick={() => setTab("clone")}
+          className={cn(
+            "px-5 py-3 text-[13.5px] font-medium transition-colors border-b-2 -mb-px",
+            tab === "clone" ? "border-ink text-ink font-semibold" : "border-transparent text-ink-faint hover:text-ink"
           )}
-
-          {section === "create" && (
-            <CreateSection
-              autosaveTick={autosaveTick}
-              cloneProgress={cloneProgress}
-              createForm={createForm}
-              createTab={createTab}
-              setCloneProgress={setCloneProgress}
-              setCreateForm={setCreateForm}
-              setCreateTab={setCreateTab}
-              setSection={setSection}
-              setSelectedVoiceId={setSelectedVoiceId}
-              setTestVoiceId={setTestVoiceId}
-              onCreateSave={handleCreateVoiceSave}
-              onCloneSave={handleCloneVoiceSave}
-            />
+        >
+          + Clone Voice
+        </button>
+        <button
+          onClick={() => setTab("session")}
+          className={cn(
+            "px-5 py-3 text-[13.5px] font-medium transition-colors border-b-2 -mb-px flex items-center gap-1.5",
+            tab === "session" ? "border-ink text-ink font-semibold" : "border-transparent text-ink-faint hover:text-ink"
           )}
-
-          {section === "test" && (
-            <TestSection
-              activeScenario={activeScenario}
-              conversationPlaying={conversationPlaying}
-              scenarioId={scenarioId}
-              setConversationPlaying={setConversationPlaying}
-              setScenarioId={setScenarioId}
-              setTestVoiceId={setTestVoiceId}
-              testVoice={testVoice}
-              voices={voices}
-            />
-          )}
-
-          {section === "settings" && <SettingsSection voices={voices} />}
-        </motion.div>
-      </AnimatePresence>
-
-      <VoiceDrawer
-        selectedVoice={selectedVoice}
-        onAssign={() => setAssignmentOpen(true)}
-        onClose={() => setSelectedVoiceId(null)}
-        onDuplicate={duplicateVoice}
-        onEdit={() => setSection("create")}
-        onPreview={togglePreview}
-        playbackVoiceId={playbackVoiceId}
-        visible={section === "library" && Boolean(selectedVoiceId)}
-      />
-
-      <AssignmentModal
-        filteredAgents={filteredAgents}
-        onAssign={assignVoice}
-        onClose={() => setAssignmentOpen(false)}
-        open={assignmentOpen}
-        query={assignmentQuery}
-        selectedVoice={selectedVoice}
-        setQuery={setAssignmentQuery}
-        voices={voices}
-      />
-    </div>
-  );
-}
-
-function LibrarySection({
-  filteredVoices,
-  hoveredVoiceId,
-  loading,
-  onHoverVoice,
-  onOpenVoice,
-  onPreview,
-  playbackVoiceId,
-  query,
-  setAssignmentOpen,
-  setQuery,
-}: {
-  filteredVoices: VoiceItem[];
-  hoveredVoiceId: string | null;
-  loading: boolean;
-  onHoverVoice: (voiceId: string | null) => void;
-  onOpenVoice: (voiceId: string) => void;
-  onPreview: (voiceId: string) => void;
-  playbackVoiceId: string | null;
-  query: string;
-  setAssignmentOpen: (open: boolean) => void;
-  setQuery: (value: string) => void;
-}) {
-  return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-        <label className="flex flex-1 items-center gap-3 rounded-2xl border border-line bg-surface px-4 py-3 shadow-soft">
-          <Search size={16} className="text-ink-faint" />
-          <input
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search voices or describe the style..."
-            className="w-full bg-transparent text-[14px] text-ink placeholder:text-ink-faint focus:outline-none"
-          />
-        </label>
-        <div className="flex items-center gap-2">
-          {["Friendly support", "Luxury concierge", "Calm healthcare", "Professional sales"].map((example) => (
-            <button
-              key={example}
-              onClick={() => setQuery(example)}
-              className="rounded-full border border-line bg-surface px-3 py-1.5 text-[12px] text-ink-soft transition-colors hover:border-accent/30 hover:text-accent"
-            >
-              {example}
-            </button>
-          ))}
-          <Button variant="outline" size="sm" icon={<Sparkles size={13} />} onClick={() => setAssignmentOpen(true)}>
-            Assign
-          </Button>
-        </div>
+        >
+          <Sparkles size={14} className="text-violet" /> Realtime Voice Agent
+        </button>
       </div>
 
-      {loading ? (
-        <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3">
-          {Array.from({ length: 6 }).map((_, index) => (
-            <Panel key={index} className="space-y-5">
-              <Skeleton className="h-4 w-28" />
-              <Skeleton className="h-12 w-full" />
-              <div className="flex items-center justify-between">
-                <Skeleton className="h-3 w-20" />
-                <Skeleton className="h-9 w-24 rounded-full" />
-              </div>
-            </Panel>
-          ))}
-        </div>
-      ) : filteredVoices.length === 0 ? (
-        <EmptyState
-          title="No voices match yet"
-          description="Try a style phrase like “Luxury concierge” or clear the search to browse the full library."
-          action={
-            <Button variant="outline" onClick={() => setQuery("")}>
-              Clear search
-            </Button>
-          }
-        />
-      ) : (
-        <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3">
-          {filteredVoices.map((voice) => {
-            const previewing = playbackVoiceId === voice.id || hoveredVoiceId === voice.id;
-            return (
-              <button
-                key={voice.id}
-                onClick={() => onOpenVoice(voice.id)}
-                onMouseEnter={() => onHoverVoice(voice.id)}
-                onMouseLeave={() => onHoverVoice(null)}
-                className="group rounded-2xl border border-line bg-surface p-6 text-left shadow-soft transition-all duration-200 hover:-translate-y-0.5 hover:border-ink/12 hover:shadow-soft-lg"
-              >
-                <div className="flex items-start justify-between gap-4">
-                  <div className="space-y-2">
-                    <p className="text-[15px] font-semibold tracking-tight text-ink">{voice.name}</p>
-                    <p className="max-w-[28ch] text-[13px] leading-relaxed text-ink-soft">{voice.description}</p>
-                  </div>
-                  <button
-                    onClick={(event) => event.stopPropagation()}
-                    className="rounded-full p-2 text-ink-faint transition-colors hover:bg-canvas-alt hover:text-ink"
-                    aria-label={`More actions for ${voice.name}`}
-                  >
-                    <MoreHorizontal size={16} />
-                  </button>
-                </div>
+      {/* LIBRARY TAB */}
+      {tab === "library" && (
+        <div className="space-y-6">
+          <div className="flex items-center gap-3">
+            <div className="relative flex-1 max-w-md">
+              <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-ink-faint" />
+              <input
+                type="text"
+                placeholder="Search voices by name, category..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="w-full rounded-xl border border-line bg-surface pl-10 pr-4 py-2 text-[13.5px] text-ink focus:outline-none focus:border-ink/30"
+              />
+            </div>
+          </div>
 
-                <div className="mt-8 flex items-center justify-between">
-                  <span className="text-[12px] text-ink-faint">{voice.language}</span>
-                  <button
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      onPreview(voice.id);
-                    }}
-                    className={cn(
-                      "inline-flex items-center gap-2 rounded-full border px-3.5 py-2 text-[12.5px] font-medium transition-colors",
-                      previewing
-                        ? "border-accent bg-accent-soft text-accent"
-                        : "border-line bg-canvas-alt/50 text-ink-soft hover:text-ink",
-                    )}
-                  >
-                    {previewing ? <Pause size={13} /> : <Play size={13} />}
-                    Preview
-                  </button>
-                </div>
-              </button>
-            );
-          })}
+          {voicesLoading ? (
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {[1, 2, 3, 4, 5, 6].map((i) => (
+                <div key={i} className="h-44 rounded-2xl border border-line bg-surface p-5 animate-pulse" />
+              ))}
+            </div>
+          ) : filteredVoices.length === 0 ? (
+            <EmptyState
+              title="No voices found"
+              description="No ElevenLabs voices matched your query."
+            />
+          ) : (
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {filteredVoices.map((voice) => (
+                <Panel key={voice.id} className="relative flex flex-col justify-between p-5 hover:border-ink/20 transition-all">
+                  <div>
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex items-center gap-2.5">
+                        <div className="flex h-9 w-9 items-center justify-center rounded-full bg-violet/10 text-violet">
+                          <AudioLines size={18} />
+                        </div>
+                        <div>
+                          <h3 className="font-semibold text-[14.5px] text-ink">{voice.name}</h3>
+                          <span className="text-[11px] text-ink-faint capitalize">{voice.category} • {voice.language}</span>
+                        </div>
+                      </div>
+                      {voice.is_custom && (
+                        <button
+                          onClick={() => deleteMutation.mutate(voice.id)}
+                          className="text-ink-faint hover:text-rose-500 transition-colors p-1"
+                          title="Delete voice"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      )}
+                    </div>
+                    <p className="mt-3 text-[13px] text-ink-soft line-clamp-2 leading-relaxed">
+                      {voice.description}
+                    </p>
+                  </div>
+
+                  <div className="mt-6 flex items-center justify-between border-t border-line/60 pt-4">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      icon={playingVoiceId === voice.id ? <Pause size={13} /> : <Play size={13} />}
+                      onClick={() => handleTogglePreview(voice)}
+                    >
+                      {playingVoiceId === voice.id ? "Pause" : "Preview"}
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => setAssignVoice(voice)}
+                    >
+                      Assign to Agent
+                    </Button>
+                  </div>
+                </Panel>
+              ))}
+            </div>
+          )}
         </div>
       )}
-    </div>
-  );
-}
 
-function CreateSection({
-  autosaveTick,
-  cloneProgress,
-  createForm,
-  createTab,
-  setCloneProgress,
-  setCreateForm,
-  setCreateTab,
-  setSection,
-  setSelectedVoiceId,
-  setTestVoiceId,
-  onCreateSave,
-  onCloneSave,
-}: {
-  autosaveTick: string;
-  cloneProgress: number;
-  createForm: {
-    name: string;
-    baseVoice: string;
-    speakingSpeed: number;
-    warmth: number;
-    energy: number;
-  };
-  createTab: CreateTab;
-  setCloneProgress: (value: number) => void;
-  setCreateForm: (value: {
-    name: string;
-    baseVoice: string;
-    speakingSpeed: number;
-    warmth: number;
-    energy: number;
-  }) => void;
-  setCreateTab: (value: CreateTab) => void;
-  setSection: (value: VoiceSection) => void;
-  setSelectedVoiceId: (value: string | null) => void;
-  setTestVoiceId: (value: string) => void;
-  onCreateSave: () => void;
-  onCloneSave: () => void;
-}) {
-  return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-1 rounded-full border border-line bg-surface p-1 shadow-soft">
-          <button
-            onClick={() => setCreateTab("create")}
-            className={cn(
-              "rounded-full px-4 py-2 text-[13px] font-medium transition-colors",
-              createTab === "create" ? "bg-ink text-white" : "text-ink-soft",
-            )}
-          >
-            Create Voice
-          </button>
-          <button
-            onClick={() => setCreateTab("clone")}
-            className={cn(
-              "rounded-full px-4 py-2 text-[13px] font-medium transition-colors",
-              createTab === "clone" ? "bg-ink text-white" : "text-ink-soft",
-            )}
-          >
-            Clone Voice
-          </button>
-        </div>
-        <p className="text-[12.5px] text-ink-faint">{autosaveTick}</p>
-      </div>
+      {/* CLONE VOICE TAB */}
+      {tab === "clone" && (
+        <Panel className="max-w-2xl mx-auto p-6 space-y-6">
+          <div>
+            <h3 className="text-lg font-semibold text-ink">Clone Custom ElevenLabs Voice</h3>
+            <p className="mt-1 text-[13px] text-ink-soft">
+              Upload a clear audio sample (MP3 / WAV) of the voice you want to synthesize.
+            </p>
+          </div>
 
-      {createTab === "create" ? (
-        <div className="grid grid-cols-1 gap-8 lg:grid-cols-[1fr_360px]">
-          <Panel className="space-y-6">
-            <FieldLabel label="Voice name" />
-            <input
-              value={createForm.name}
-              onChange={(event) => setCreateForm({ ...createForm, name: event.target.value })}
-              className="w-full rounded-2xl border border-line bg-canvas-alt/30 px-4 py-3 text-[14px] text-ink focus:border-accent/40 focus:outline-none"
-            />
+          {cloneError && (
+            <div className="flex items-center gap-2 rounded-xl bg-rose-50 p-3 text-[13px] text-rose-600">
+              <AlertCircle size={16} />
+              <span>{cloneError}</span>
+            </div>
+          )}
 
-            <div className="space-y-2">
-              <FieldLabel label="Base voice" />
-              <button className="flex w-full items-center justify-between rounded-2xl border border-line bg-canvas-alt/30 px-4 py-3 text-[14px] text-ink">
-                {createForm.baseVoice}
-                <ChevronDown size={15} className="text-ink-faint" />
-              </button>
-              <div className="flex flex-wrap gap-2">
-                {baseVoices.map((voice) => (
-                  <button
-                    key={voice}
-                    onClick={() => setCreateForm({ ...createForm, baseVoice: voice })}
-                    className={cn(
-                      "rounded-full border px-3 py-1.5 text-[12px] transition-colors",
-                      createForm.baseVoice === voice
-                        ? "border-accent bg-accent-soft text-accent"
-                        : "border-line bg-surface text-ink-soft",
-                    )}
-                  >
-                    {voice}
-                  </button>
-                ))}
-              </div>
+          <div className="space-y-4">
+            <div>
+              <label className="block text-[12px] font-medium text-ink-soft mb-1">Voice Name</label>
+              <input
+                type="text"
+                placeholder="e.g. Executive Support Voice"
+                value={cloneName}
+                onChange={(e) => setCloneName(e.target.value)}
+                className="w-full rounded-xl border border-line bg-canvas-alt px-3.5 py-2.5 text-[13.5px] text-ink focus:outline-none focus:border-ink/30"
+              />
             </div>
 
-            <RangeField
-              label="Speaking Speed"
-              value={createForm.speakingSpeed}
-              onChange={(value) => setCreateForm({ ...createForm, speakingSpeed: value })}
-            />
-            <RangeField
-              label="Warmth"
-              value={createForm.warmth}
-              onChange={(value) => setCreateForm({ ...createForm, warmth: value })}
-            />
-            <RangeField
-              label="Energy"
-              value={createForm.energy}
-              onChange={(value) => setCreateForm({ ...createForm, energy: value })}
-            />
-          </Panel>
+            <div>
+              <label className="block text-[12px] font-medium text-ink-soft mb-1">Description</label>
+              <textarea
+                rows={2}
+                placeholder="Short note describing tone and intended use case..."
+                value={cloneDesc}
+                onChange={(e) => setCloneDesc(e.target.value)}
+                className="w-full rounded-xl border border-line bg-canvas-alt px-3.5 py-2.5 text-[13.5px] text-ink focus:outline-none focus:border-ink/30"
+              />
+            </div>
 
-          <Panel className="space-y-5">
-            <div className="space-y-2">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-accent">Live preview</p>
-              <h3 className="text-[22px] font-semibold tracking-tight text-ink">{createForm.name}</h3>
-              <p className="text-[13.5px] leading-relaxed text-ink-soft">
-                Warm and clear with a premium, calm finish suited to guided service conversations.
+            <div>
+              <label className="block text-[12px] font-medium text-ink-soft mb-1">Audio Sample File</label>
+              <input
+                type="file"
+                accept="audio/*"
+                onChange={(e) => setCloneFile(e.target.files?.[0] || null)}
+                className="w-full text-xs text-ink-soft file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-ink file:text-white hover:file:bg-ink/80 cursor-pointer"
+              />
+            </div>
+
+            <div className="flex items-start gap-2.5 rounded-xl border border-line/80 bg-canvas-alt/50 p-3.5">
+              <input
+                type="checkbox"
+                id="consent-check"
+                checked={confirmPermission}
+                onChange={(e) => setConfirmPermission(e.target.checked)}
+                className="mt-0.5 rounded border-line text-ink focus:ring-0"
+              />
+              <label htmlFor="consent-check" className="text-[12.5px] text-ink-soft leading-snug cursor-pointer">
+                I confirm that I have explicit permission and legal rights to clone and synthesize this audio sample with ElevenLabs.
+              </label>
+            </div>
+          </div>
+
+          <div className="flex justify-end gap-3 pt-2 border-t border-line">
+            <Button variant="outline" onClick={() => setTab("library")}>Cancel</Button>
+            <Button
+              variant="primary"
+              disabled={!cloneName || !cloneFile || !confirmPermission || cloneMutation.isPending}
+              onClick={() => cloneMutation.mutate()}
+            >
+              {cloneMutation.isPending ? "Cloning Voice..." : "Clone Voice"}
+            </Button>
+          </div>
+        </Panel>
+      )}
+
+      {/* REALTIME VOICE SESSION TAB */}
+      {tab === "session" && (
+        <Panel className="max-w-3xl mx-auto p-6 space-y-6">
+          <div className="flex items-center justify-between border-b border-line pb-4">
+            <div>
+              <h3 className="text-lg font-semibold text-ink flex items-center gap-2">
+                <Sparkles size={18} className="text-violet" /> Realtime Voice Agent Session
+              </h3>
+              <p className="mt-0.5 text-[13px] text-ink-soft">
+                Connect directly to your Zhyra agent's voice stream to test speech recognition, memory, and tool calls.
               </p>
             </div>
 
-            <Waveform active />
+            <span className={cn(
+              "px-3 py-1 rounded-full text-xs font-semibold uppercase tracking-wider",
+              sessionState === "CONNECTED" && "bg-emerald-100 text-emerald-700",
+              sessionState === "LISTENING" && "bg-blue-100 text-blue-700",
+              sessionState === "THINKING" && "bg-amber-100 text-amber-700 animate-pulse",
+              sessionState === "TOOL_EXECUTION" && "bg-violet-100 text-violet-700 animate-pulse",
+              sessionState === "SPEAKING" && "bg-indigo-100 text-indigo-700",
+              sessionState === "ERROR" && "bg-rose-100 text-rose-700",
+              sessionState === "IDLE" && "bg-canvas-alt text-ink-faint"
+            )}>
+              {sessionState === "TOOL_EXECUTION" ? "WORKING (Tool Call)" : sessionState}
+            </span>
+          </div>
 
-            <div className="grid grid-cols-3 gap-3">
-              <Metric label="Speed" value={createForm.speakingSpeed} />
-              <Metric label="Warmth" value={createForm.warmth} />
-              <Metric label="Energy" value={createForm.energy} />
-            </div>
-
-            <div className="flex gap-2 pt-2">
-              <Button icon={<Play size={14} />}>Preview</Button>
-              <Button variant="outline" icon={<WandSparkles size={14} />} onClick={() => setSection("test")}>
-                Test voice
-              </Button>
-              <Button icon={<Check size={14} />} onClick={onCreateSave}>
-                Save Voice
-              </Button>
-            </div>
-          </Panel>
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 gap-8 lg:grid-cols-[1fr_360px]">
-          <Panel className="space-y-6">
-            <div>
-              <FieldLabel label="Upload recordings" />
-              <button className="mt-2 flex min-h-56 w-full flex-col items-center justify-center gap-4 rounded-[24px] border border-dashed border-line bg-canvas-alt/30 text-center transition-colors hover:border-accent/35 hover:bg-accent-soft/40">
-                <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-surface text-ink shadow-soft">
-                  <Upload size={18} />
-                </span>
-                <div className="space-y-1">
-                  <p className="text-[14px] font-medium text-ink">Drop clean recordings here</p>
-                  <p className="text-[12.5px] text-ink-soft">WAV, MP3, or M4A · 3–10 minutes recommended</p>
-                </div>
-              </button>
-            </div>
-
-            <div className="space-y-3">
-              <div className="flex items-center justify-between text-[13px]">
-                <span className="text-ink-soft">Upload progress</span>
-                <span className="font-medium text-ink">{cloneProgress}%</span>
-              </div>
-              <div className="h-2 overflow-hidden rounded-full bg-canvas-alt">
-                <div className="h-full rounded-full bg-accent transition-[width] duration-500" style={{ width: `${cloneProgress}%` }} />
-              </div>
-              <div className="flex gap-2">
-                <Button variant="ghost" size="sm" onClick={() => setCloneProgress(Math.min(cloneProgress + 14, 100))}>
-                  Add sample
-                </Button>
-                <Badge tone={cloneProgress > 80 ? "emerald" : "amber"}>{cloneProgress > 80 ? "Strong match" : "Needs more variety"}</Badge>
-              </div>
-            </div>
-          </Panel>
-
-          <Panel className="space-y-5">
-            <div className="flex items-center justify-between">
+          {!sessionActive ? (
+            <div className="space-y-4">
               <div>
-                <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-accent">Generated preview</p>
-                <p className="mt-2 text-[18px] font-semibold tracking-tight text-ink">Auric Custom</p>
+                <label className="block text-[12px] font-medium text-ink-soft mb-1.5">Select Agent</label>
+                <select
+                  value={sessionAgentId}
+                  onChange={(e) => setSessionAgentId(e.target.value)}
+                  className="w-full rounded-xl border border-line bg-surface px-3.5 py-2.5 text-[13.5px] text-ink focus:outline-none"
+                >
+                  <option value="">Select an Agent...</option>
+                  {agents.map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.name} ({a.purpose}) — Voice: {a.voice_config?.voice_name || (a.voice_config?.enabled ? "Enabled" : "Not configured")}
+                    </option>
+                  ))}
+                </select>
               </div>
-              <Badge tone={cloneProgress > 80 ? "emerald" : "amber"}>{cloneProgress > 80 ? "Ready" : "Training"}</Badge>
-            </div>
-            <Waveform active={cloneProgress > 65} />
-            <div className="rounded-2xl border border-line bg-canvas-alt/40 p-4">
-              <p className="text-[12px] text-ink-faint">Voice quality indicator</p>
-              <p className="mt-1 text-[14px] font-medium text-ink">Natural pacing · Strong consistency · Light room noise</p>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <Button icon={<Check size={14} />} onClick={onCloneSave}>
-                Save
-              </Button>
-              <Button variant="outline" icon={<Sparkles size={14} />} onClick={() => setSelectedVoiceId("voice-auric")}>
-                Assign to Agent
-              </Button>
-              <Button variant="ghost" icon={<Play size={14} />} onClick={() => setTestVoiceId("voice-auric")}>
-                Test
+
+              <Button
+                variant="primary"
+                disabled={!sessionAgentId}
+                icon={<Mic size={15} />}
+                onClick={startRealtimeSession}
+                className="w-full justify-center py-3"
+              >
+                Start Realtime Voice Session
               </Button>
             </div>
-          </Panel>
-        </div>
+          ) : (
+            <div className="space-y-6">
+              {/* Event Log Monitor */}
+              <div className="h-64 rounded-xl border border-line bg-canvas-alt/70 p-4 overflow-y-auto font-mono text-xs space-y-2">
+                {sessionEvents.map((ev, idx) => (
+                  <div key={idx} className="text-ink-soft leading-relaxed">
+                    <span className="text-ink-faint">[{new Date().toLocaleTimeString()}]</span> {ev}
+                  </div>
+                ))}
+              </div>
+
+              {/* Action Bar */}
+              <div className="flex items-center gap-3">
+                <input
+                  type="text"
+                  placeholder="Type speech input or say prompt (e.g. 'Schedule a meeting tomorrow at 3 PM')..."
+                  value={userSpeechInput}
+                  onChange={(e) => setUserSpeechInput(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && sendUserSpeech()}
+                  className="flex-1 rounded-xl border border-line bg-surface px-4 py-2.5 text-[13.5px] text-ink focus:outline-none"
+                />
+                <Button variant="primary" onClick={sendUserSpeech}>Send</Button>
+                <Button variant="outline" icon={<MicOff size={14} />} onClick={stopRealtimeSession}>End</Button>
+              </div>
+            </div>
+          )}
+        </Panel>
       )}
-    </div>
-  );
-}
 
-function TestSection({
-  activeScenario,
-  conversationPlaying,
-  scenarioId,
-  setConversationPlaying,
-  setScenarioId,
-  setTestVoiceId,
-  testVoice,
-  voices,
-}: {
-  activeScenario: (typeof scenarios)[number];
-  conversationPlaying: boolean;
-  scenarioId: string;
-  setConversationPlaying: (value: boolean) => void;
-  setScenarioId: (value: string) => void;
-  setTestVoiceId: (value: string) => void;
-  testVoice: VoiceItem;
-  voices: VoiceItem[];
-}) {
-  return (
-    <div className="grid grid-cols-1 gap-8 lg:grid-cols-[250px_1fr]">
-      <div className="space-y-4">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-ink-faint">Scenario</p>
-        <div className="space-y-1.5">
-          {scenarios.map((scenario) => (
-            <button
-              key={scenario.id}
-              onClick={() => setScenarioId(scenario.id)}
-              className={cn(
-                "w-full rounded-2xl px-4 py-3 text-left transition-colors",
-                scenarioId === scenario.id ? "bg-surface text-ink shadow-soft" : "text-ink-soft hover:bg-surface/70",
-              )}
-            >
-              <p className="text-[13.5px] font-medium">{scenario.label}</p>
-              <p className="mt-1 text-[12px] text-ink-faint">{scenario.assignedAgent}</p>
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <Panel className="space-y-6">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-accent">Conversation preview</p>
-            <h3 className="mt-2 text-[22px] font-semibold tracking-tight text-ink">{activeScenario.label}</h3>
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setConversationPlaying(!conversationPlaying)}
-              className="inline-flex items-center gap-2 rounded-full bg-ink px-4 py-2 text-[13px] font-medium text-white transition-transform hover:-translate-y-px"
-            >
-              {conversationPlaying ? <Pause size={14} /> : <Play size={14} />}
-              Play conversation
-            </button>
-            <button
-              onClick={() => setConversationPlaying(true)}
-              className="inline-flex items-center gap-2 rounded-full border border-line bg-surface px-4 py-2 text-[13px] font-medium text-ink-soft"
-            >
-              <Play size={14} />
-              Replay
-            </button>
-          </div>
-        </div>
-
-        <div className="rounded-[24px] border border-line bg-canvas-alt/35 p-5">
-          <Waveform active={conversationPlaying} />
-          <div className="mt-5 space-y-3">
-            {activeScenario.lines.map((line, index) => (
-              <div key={`${line.from}-${index}`} className="flex items-start justify-between gap-4">
-                <p className="text-[12px] uppercase tracking-[0.14em] text-ink-faint">{line.from}</p>
-                <p className="max-w-[72%] text-[14px] leading-relaxed text-ink">{line.text}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2">
-          <button className="inline-flex items-center gap-2 rounded-full border border-line bg-surface px-3.5 py-2 text-[13px] text-ink">
-            <ChevronsUpDown size={14} />
-            {testVoice.name}
-          </button>
-          {voices.map((voice) => (
-            <button
-              key={voice.id}
-              onClick={() => setTestVoiceId(voice.id)}
-              className={cn(
-                "rounded-full border px-3 py-1.5 text-[12px] transition-colors",
-                voice.id === testVoice.id ? "border-accent bg-accent-soft text-accent" : "border-line text-ink-soft",
-              )}
-            >
-              {voice.name}
-            </button>
-          ))}
-        </div>
-
-        <div className="grid grid-cols-1 gap-4 border-t border-line pt-5 sm:grid-cols-3">
-          <SummaryItem label="Response time" value={activeScenario.responseTime} />
-          <SummaryItem label="Language" value={activeScenario.language} />
-          <SummaryItem label="Assigned Agent" value={activeScenario.assignedAgent} />
-        </div>
-
-        <div className="flex items-center justify-between rounded-2xl border border-line bg-canvas-alt/30 px-4 py-3 text-[12.5px] text-ink-faint">
-          <span>Shortcuts</span>
-          <span>Space to play · R to replay</span>
-        </div>
-      </Panel>
-    </div>
-  );
-}
-
-function SettingsSection({ voices }: { voices: VoiceItem[] }) {
-  return (
-    <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-      <Panel className="space-y-3">
-        <div className="flex items-center gap-2 text-ink">
-          <AudioLines size={16} />
-          <h3 className="text-[14px] font-semibold">Default voice</h3>
-        </div>
-        <p className="text-[13px] text-ink-soft">New agents start with {voices[0].name} until a custom voice is assigned.</p>
-        <button className="flex items-center justify-between rounded-2xl border border-line bg-canvas-alt/40 px-4 py-3 text-[13px] text-ink">
-          {voices[0].name}
-          <ChevronDown size={14} className="text-ink-faint" />
-        </button>
-      </Panel>
-
-      <Panel className="space-y-3">
-        <div className="flex items-center gap-2 text-ink">
-          <Settings2 size={16} />
-          <h3 className="text-[14px] font-semibold">Voice provider</h3>
-        </div>
-        <p className="text-[13px] text-ink-soft">Choose the default provider used for preview, synthesis, and cloning.</p>
-        <button className="flex items-center justify-between rounded-2xl border border-line bg-canvas-alt/40 px-4 py-3 text-[13px] text-ink">
-          ElevenLabs
-          <ChevronDown size={14} className="text-ink-faint" />
-        </button>
-      </Panel>
-
-      <Panel className="space-y-3">
-        <div className="flex items-center gap-2 text-ink">
-          <Languages size={16} />
-          <h3 className="text-[14px] font-semibold">Language preferences</h3>
-        </div>
-        <p className="text-[13px] text-ink-soft">Set the primary languages your team should see first across the studio.</p>
-        <div className="flex flex-wrap gap-2">
-          {["English (US)", "English (UK)", "Spanish"].map((language) => (
-            <Badge key={language}>{language}</Badge>
-          ))}
-        </div>
-      </Panel>
-    </div>
-  );
-}
-
-function VoiceDrawer({
-  selectedVoice,
-  onAssign,
-  onClose,
-  onDuplicate,
-  onEdit,
-  onPreview,
-  playbackVoiceId,
-  visible,
-}: {
-  selectedVoice: VoiceItem;
-  onAssign: () => void;
-  onClose: () => void;
-  onDuplicate: () => void;
-  onEdit: () => void;
-  onPreview: (voiceId: string) => void;
-  playbackVoiceId: string | null;
-  visible: boolean;
-}) {
-  return (
-    <AnimatePresence>
-      {visible && (
-        <>
+      {/* ASSIGN VOICE MODAL */}
+      <AnimatePresence>
+        {assignVoice && (
           <motion.div
-            className="fixed inset-0 z-30 bg-ink/10 backdrop-blur-[2px]"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            onClick={onClose}
-          />
-          <motion.aside
-            initial={{ opacity: 0, x: 28 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: 28 }}
-            transition={{ duration: 0.18 }}
-            className="fixed right-6 top-24 z-40 w-[420px] rounded-[28px] border border-line bg-surface p-6 shadow-soft-lg"
+            className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 backdrop-blur-xs p-4"
           >
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-accent">Voice details</p>
-                <h3 className="mt-2 text-[26px] font-semibold tracking-tight text-ink">{selectedVoice.name}</h3>
-              </div>
-              <button onClick={onClose} className="rounded-full p-2 text-ink-faint transition-colors hover:bg-canvas-alt hover:text-ink">
-                <X size={16} />
-              </button>
-            </div>
-
-            <div className="mt-5 rounded-[24px] border border-line bg-canvas-alt/40 p-5">
-              <div className="flex items-center justify-between">
-                <p className="text-[13px] text-ink-soft">Audio preview</p>
-                <button
-                  onClick={() => onPreview(selectedVoice.id)}
-                  className="inline-flex items-center gap-2 rounded-full bg-ink px-3.5 py-2 text-[12.5px] font-medium text-white"
-                >
-                  {playbackVoiceId === selectedVoice.id ? <Pause size={13} /> : <Play size={13} />}
-                  {playbackVoiceId === selectedVoice.id ? "Pause" : "Play"}
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="w-full max-w-md rounded-2xl border border-line bg-surface p-6 shadow-soft-lg space-y-5"
+            >
+              <div className="flex items-center justify-between border-b border-line pb-3">
+                <h3 className="font-semibold text-ink">Assign "{assignVoice.name}" to Agent</h3>
+                <button onClick={() => setAssignVoice(null)} className="text-ink-faint hover:text-ink">
+                  <X size={16} />
                 </button>
               </div>
-              <div className="mt-4">
-                <Waveform active={playbackVoiceId === selectedVoice.id} large />
-              </div>
-            </div>
 
-            <div className="mt-6 space-y-5">
-              <div>
-                <p className="text-[12px] text-ink-faint">Voice description</p>
-                <p className="mt-1 text-[14px] leading-relaxed text-ink">{selectedVoice.description}</p>
-              </div>
-
-              <div>
-                <p className="text-[12px] text-ink-faint">Languages</p>
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {selectedVoice.languages.map((language) => (
-                    <Badge key={language}>{language}</Badge>
-                  ))}
+              {assignSuccess ? (
+                <div className="py-6 text-center text-emerald-600 font-medium">
+                  ✓ Voice assigned successfully!
                 </div>
-              </div>
-
-              <div className="flex flex-wrap gap-2 pt-2">
-                <Button icon={<Sparkles size={14} />} onClick={onAssign}>
-                  Assign to Agent
-                </Button>
-                <Button variant="outline" icon={<WandSparkles size={14} />} onClick={onDuplicate}>
-                  Duplicate
-                </Button>
-                <Button variant="ghost" icon={<SlidersHorizontal size={14} />} onClick={onEdit}>
-                  Edit
-                </Button>
-              </div>
-            </div>
-          </motion.aside>
-        </>
-      )}
-    </AnimatePresence>
-  );
-}
-
-function AssignmentModal({
-  filteredAgents,
-  onAssign,
-  onClose,
-  open,
-  query,
-  selectedVoice,
-  setQuery,
-  voices,
-}: {
-  filteredAgents: any[];
-  onAssign: (agentId: string) => void;
-  onClose: () => void;
-  open: boolean;
-  query: string;
-  selectedVoice: VoiceItem;
-  setQuery: (value: string) => void;
-  voices: VoiceItem[];
-}) {
-  return (
-    <AnimatePresence>
-      {open && (
-        <motion.div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-ink/20 px-6 backdrop-blur-sm"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          onClick={onClose}
-        >
-          <motion.div
-            initial={{ opacity: 0, y: 14, scale: 0.98 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 14, scale: 0.98 }}
-            transition={{ duration: 0.18 }}
-            onClick={(event) => event.stopPropagation()}
-            className="w-full max-w-xl rounded-[28px] border border-line bg-surface p-6 shadow-soft-lg"
-          >
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-accent">Agent assignment</p>
-                <h3 className="mt-2 text-[24px] font-semibold tracking-tight text-ink">Assign {selectedVoice.name}</h3>
-              </div>
-              <button onClick={onClose} className="rounded-full p-2 text-ink-faint transition-colors hover:bg-canvas-alt hover:text-ink">
-                <X size={16} />
-              </button>
-            </div>
-
-            <label className="mt-6 flex items-center gap-3 rounded-2xl border border-line bg-canvas-alt/35 px-4 py-3">
-              <Search size={16} className="text-ink-faint" />
-              <input
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder="Search agents"
-                className="w-full bg-transparent text-[14px] text-ink placeholder:text-ink-faint focus:outline-none"
-              />
-            </label>
-
-            <div className="mt-5 max-h-[360px] space-y-2 overflow-y-auto pr-1 scrollbar-thin">
-              {filteredAgents.map((agent) => {
-                const currentVoice = voices.find((voice) => voice.assignedAgentIds.includes(agent.id))?.name ?? "Not assigned";
-                const selected = currentVoice === selectedVoice.name;
-                return (
-                  <button
-                    key={agent.id}
-                    onClick={() => onAssign(agent.id)}
-                    className="flex w-full items-center justify-between rounded-2xl border border-line bg-surface px-4 py-3 text-left transition-colors hover:bg-canvas-alt/40"
-                  >
-                    <div>
-                      <p className="text-[13.5px] font-medium text-ink">{agent.name}</p>
-                      <p className="mt-1 text-[12.5px] text-ink-soft">Current voice: {currentVoice}</p>
-                    </div>
-                    <span
-                      className={cn(
-                        "inline-flex items-center gap-1 rounded-full px-3 py-1.5 text-[12px] font-medium",
-                        selected ? "bg-accent-soft text-accent" : "bg-canvas-alt text-ink-soft",
-                      )}
+              ) : (
+                <div className="space-y-4">
+                  <p className="text-[13px] text-ink-soft">
+                    Select an AI Agent to receive this ElevenLabs voice profile.
+                  </p>
+                  <div>
+                    <label className="block text-[12px] font-medium text-ink-soft mb-1">Target Agent</label>
+                    <select
+                      value={selectedAgentId}
+                      onChange={(e) => setSelectedAgentId(e.target.value)}
+                      className="w-full rounded-xl border border-line bg-canvas-alt px-3.5 py-2.5 text-[13.5px] text-ink focus:outline-none"
                     >
-                      {selected ? <Check size={12} /> : null}
-                      {selected ? "Assigned" : "Assign"}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
+                      <option value="">Choose Agent...</option>
+                      {agents.map((a) => (
+                        <option key={a.id} value={a.id}>{a.name} ({a.purpose})</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="flex justify-end gap-3 pt-3 border-t border-line">
+                    <Button variant="outline" onClick={() => setAssignVoice(null)}>Cancel</Button>
+                    <Button
+                      variant="primary"
+                      disabled={!selectedAgentId || assignMutation.isPending}
+                      onClick={() => assignMutation.mutate({ agentId: selectedAgentId, voice: assignVoice })}
+                    >
+                      {assignMutation.isPending ? "Assigning..." : "Confirm Assignment"}
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </motion.div>
           </motion.div>
-        </motion.div>
-      )}
-    </AnimatePresence>
-  );
-}
-
-function RangeField({
-  label,
-  value,
-  onChange,
-}: {
-  label: string;
-  value: number;
-  onChange: (value: number) => void;
-}) {
-  return (
-    <div className="space-y-2">
-      <div className="flex items-center justify-between">
-        <FieldLabel label={label} />
-        <span className="text-[12.5px] text-ink-faint">{value}</span>
-      </div>
-      <input
-        type="range"
-        min={0}
-        max={100}
-        value={value}
-        onChange={(event) => onChange(Number(event.target.value))}
-        className="h-2 w-full cursor-pointer appearance-none rounded-full bg-canvas-alt accent-[var(--color-accent)]"
-      />
-    </div>
-  );
-}
-
-function Waveform({ active = false, large = false }: { active?: boolean; large?: boolean }) {
-  return (
-    <div className={cn("flex items-end gap-1", large ? "h-28" : "h-20")}>
-      {[36, 54, 30, 65, 48, 72, 40, 58, 34, 52, 27, 68, 44, 60, 38].map((height, index) => (
-        <motion.span
-          key={index}
-          className={cn("w-2 rounded-full bg-accent/80", large ? "w-2.5" : "w-2")}
-          animate={{
-            height: active ? [height * 0.55, height, height * 0.72] : height * 0.55,
-            opacity: active ? [0.45, 1, 0.6] : 0.45,
-          }}
-          transition={{
-            duration: 1.15,
-            repeat: active ? Number.POSITIVE_INFINITY : 0,
-            ease: "easeInOut",
-            delay: index * 0.04,
-          }}
-        />
-      ))}
-    </div>
-  );
-}
-
-function FieldLabel({ label }: { label: string }) {
-  return <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-ink-faint">{label}</p>;
-}
-
-function Metric({ label, value }: { label: string; value: number }) {
-  return (
-    <div className="rounded-2xl border border-line bg-canvas-alt/35 px-4 py-3">
-      <p className="text-[11px] uppercase tracking-[0.14em] text-ink-faint">{label}</p>
-      <p className="mt-1 text-[18px] font-semibold text-ink">{value}</p>
-    </div>
-  );
-}
-
-function SummaryItem({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="space-y-1">
-      <p className="text-[11px] uppercase tracking-[0.14em] text-ink-faint">{label}</p>
-      <p className="text-[14px] font-medium text-ink">{value}</p>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

@@ -211,8 +211,8 @@ class ProviderManager:
                     functions=functions
                 )
                 duration = time.time() - start_time
-                # Estimate token usage (roughly 1 token = 4 chars)
-                est_tokens = (len(prompt) + len(result)) // 4
+                res_str = result or ""
+                est_tokens = (len(prompt) + len(res_str)) // 4
                 log_ai_call(provider.name, model, duration, tokens=est_tokens)
                 return result
             except Exception as e:

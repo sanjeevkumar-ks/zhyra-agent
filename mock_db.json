@@ -1,0 +1,15 @@
+{
+  "oauth_states": {
+    "NQbT8FqOde_h7XB3J5uKdPlz6_fWY500AtmEWzUfTSk": {
+      "state": "NQbT8FqOde_h7XB3J5uKdPlz6_fWY500AtmEWzUfTSk",
+      "workspace_id": "ws_test",
+      "integration_id": "int_gcal",
+      "provider": "google",
+      "created_at": 1786709057.649944,
+      "expires_at": 1786709957.649944,
+      "extra": {
+        "redirect_uri": "http://localhost:8000/api/integrations/oauth/callback/google"
+      }
+    }
+  }
+}

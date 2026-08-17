@@ -44,6 +44,20 @@ const nav = [
   { to: appRoute("/settings"), label: "Settings", icon: Settings },
 ];
 
+const createItems = [
+  { label: "New Agent", to: appRoute("/agents") },
+  { label: "New Workflow", to: appRoute("/workflows") },
+  { label: "Add Knowledge", to: appRoute("/knowledge") },
+  { label: "Voice Studio", to: appRoute("/voice-studio") },
+];
+
+const notifications: string[] = [
+  "Nova resolved 12 conversations in the last hour.",
+  "New integration webhook connected successfully.",
+  "System health check completed with 0 errors.",
+];
+
+
 export function ZhyraMark({ size = 22 }: { size?: number }) {
   return (
     <div
@@ -225,129 +239,154 @@ export function Topbar({ onSearch, title }: { onSearch: () => void; title: strin
     : "PS";
 
   return (
-    <header className="sticky top-0 z-30 flex h-16 shrink-0 items-center justify-between gap-4 border-b border-line/70 bg-canvas/80 px-6 backdrop-blur-md">
-      <p className="text-[15px] font-medium text-ink-soft">{title}</p>
+    <header className="sticky top-0 z-30 flex h-14 md:h-16 shrink-0 items-center justify-between gap-2 md:gap-4 border-b border-line/70 bg-canvas/80 px-3 md:px-6 backdrop-blur-md">
+  {/* Title */}
+  <p className="text-[14px] md:text-[15px] font-medium text-ink-soft shrink-0">{title}</p>
 
-      <div className="flex flex-1 items-center justify-center">
-        <button
-          onClick={onSearch}
-          className="flex w-full max-w-md items-center gap-2.5 rounded-full border border-line bg-surface px-4 py-2 text-[13px] text-ink-faint shadow-soft transition-all hover:border-ink/15"
-        >
-          <Sparkles size={14} className="text-violet" />
-          <span className="flex-1 text-left">Ask Zhyra anything, or create something…</span>
-          <kbd className="rounded-md border border-line bg-canvas-alt px-1.5 py-0.5 text-[10px]">⌘K</kbd>
-        </button>
-      </div>
+  {/* Search — hidden on small screens, visible md+ */}
+  <div className="hidden md:flex flex-1 items-center justify-center">
+    <button
+      onClick={onSearch}
+      className="flex w-full max-w-md items-center gap-2.5 rounded-full border border-line bg-surface px-4 py-2 text-[13px] text-ink-faint shadow-soft transition-all hover:border-ink/15"
+    >
+      <Sparkles size={14} className="text-violet" />
+      <span className="flex-1 text-left">Ask Zhyra anything, or create something…</span>
+      <kbd className="rounded-md border border-line bg-canvas-alt px-1.5 py-0.5 text-[10px]">⌘K</kbd>
+    </button>
+  </div>
 
-      <div ref={ref} className="flex items-center gap-2">
-        <div className="relative">
-          <button
-            onClick={() => setCreateOpen((v) => !v)}
-            className="inline-flex items-center gap-1.5 rounded-full bg-ink px-3.5 py-2 text-[13px] font-medium text-white shadow-soft transition-transform hover:-translate-y-px active:scale-[0.97]"
+  <div ref={ref} className="flex items-center gap-1 md:gap-2">
+    {/* Mobile search icon */}
+    <button
+      onClick={onSearch}
+      className="flex md:hidden h-9 w-9 items-center justify-center rounded-full text-ink-soft transition-colors hover:bg-canvas-alt hover:text-ink"
+    >
+      <Sparkles size={16} strokeWidth={1.8} />
+    </button>
+
+    {/* Create */}
+    <div className="relative">
+      <button
+        onClick={() => setCreateOpen((v) => !v)}
+        className="inline-flex items-center gap-1.5 rounded-full bg-ink px-3 md:px-3.5 py-2 text-[13px] font-medium text-white shadow-soft transition-transform hover:-translate-y-px active:scale-[0.97]"
+      >
+        <Plus size={14} />
+        <span className="hidden sm:inline">Create</span>
+      </button>
+
+      <AnimatePresence>
+        {createOpen && (
+          <motion.div
+            initial={{ opacity: 0, y: 6, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 6, scale: 0.98 }}
+            transition={{ duration: 0.15 }}
+            className="absolute right-0 top-11 w-56 rounded-xl border border-line bg-surface p-1.5 shadow-soft-lg"
           >
-            <Plus size={14} /> Create
-          </button>
-          <AnimatePresence>
-            {createOpen && (
-              <motion.div
-                initial={{ opacity: 0, y: 6, scale: 0.98 }}
-                animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0, y: 6, scale: 0.98 }}
-                transition={{ duration: 0.15 }}
-                className="absolute right-0 top-11 w-56 rounded-xl border border-line bg-surface p-1.5 shadow-soft-lg"
+            {createItems.map((item) => (
+              <button
+                key={item.label}
+                onClick={() => {
+                  navigate(item.to);
+                  setCreateOpen(false);
+                }}
+                className="flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-left text-[13px] text-ink hover:bg-canvas-alt"
               >
-                {[
-                  { label: "New Agent", to: appRoute("/agents") },
-                  { label: "Upload Knowledge", to: appRoute("/knowledge") },
-                  { label: "New Workflow", to: appRoute("/workflows") },
-                  { label: "Invite Teammate", to: appRoute("/team") },
-                ].map((item) => (
-                  <button
-                    key={item.label}
-                    onClick={() => {
-                      navigate(item.to);
-                      setCreateOpen(false);
-                    }}
-                    className="flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-left text-[13px] text-ink hover:bg-canvas-alt"
-                  >
-                    {item.label}
-                    <ArrowRight size={13} className="text-ink-faint" />
-                  </button>
-                ))}
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </div>
+                {item.label}
+                <ArrowRight size={13} className="text-ink-faint" />
+              </button>
+            ))}
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
 
-        <div className="relative">
-          <button
-            onClick={() => setNotifOpen((v) => !v)}
-            className="relative flex h-9 w-9 items-center justify-center rounded-full text-ink-soft transition-colors hover:bg-canvas-alt hover:text-ink"
-          >
-            <Bell size={17} strokeWidth={1.8} />
-            <span className="absolute right-2 top-2 h-1.5 w-1.5 rounded-full bg-accent" />
-          </button>
-          <AnimatePresence>
-            {notifOpen && (
-              <motion.div
-                initial={{ opacity: 0, y: 6, scale: 0.98 }}
-                animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0, y: 6, scale: 0.98 }}
-                transition={{ duration: 0.15 }}
-                className="absolute right-0 top-11 w-80 rounded-xl border border-line bg-surface p-2 shadow-soft-lg"
-              >
-                <p className="px-2 py-1.5 text-xs font-semibold uppercase tracking-wide text-ink-faint">Zhyra Summary</p>
-                {[
-                  "Nova resolved 96% of conversations today — no action needed.",
-                  "Sage flagged a knowledge gap in EU return policy.",
-                  "3 conversations are waiting for human review.",
-                ].map((n, i) => (
-                  <div key={i} className="rounded-lg px-2 py-2 text-[13px] leading-snug text-ink-soft hover:bg-canvas-alt">
-                    {n}
-                  </div>
-                ))}
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </div>
+    {/* Notifications */}
+    <div className="relative">
+      <button
+        onClick={() => setNotifOpen((v) => !v)}
+        className="relative flex h-9 w-9 items-center justify-center rounded-full text-ink-soft transition-colors hover:bg-canvas-alt hover:text-ink"
+      >
+        <Bell size={17} strokeWidth={1.8} />
+        {notifications.length > 0 && (
+          <span className="absolute right-2 top-2 h-1.5 w-1.5 rounded-full bg-accent" />
+        )}
+      </button>
 
-        <div className="relative">
-          <button
-            onClick={() => setProfileOpen((v) => !v)}
-            className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-[#2F6BFF] to-[#8B7CF6] text-xs font-semibold text-white transition-transform hover:scale-[1.03] active:scale-[0.97]"
+      <AnimatePresence>
+        {notifOpen && (
+          <motion.div
+            initial={{ opacity: 0, y: 6, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 6, scale: 0.98 }}
+            transition={{ duration: 0.15 }}
+            className="absolute right-0 top-11 w-[calc(100vw-24px)] sm:w-80 rounded-xl border border-line bg-surface p-2 shadow-soft-lg"
           >
-            {userInitials}
-          </button>
-          <AnimatePresence>
-            {profileOpen && (
-              <motion.div
-                initial={{ opacity: 0, y: 6, scale: 0.98 }}
-                animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0, y: 6, scale: 0.98 }}
-                transition={{ duration: 0.15 }}
-                className="absolute right-0 top-11 w-48 rounded-xl border border-line bg-surface p-1.5 shadow-soft-lg"
-              >
-                <div className="px-2.5 py-2 text-left">
-                  <p className="text-[13px] font-semibold text-ink leading-tight">{user?.name || "Member"}</p>
-                  <p className="text-[11px] text-ink-faint leading-normal truncate">{user?.email}</p>
-                </div>
-                <div className="my-1 h-px bg-line" />
-                <button
-                  onClick={async () => {
-                    setProfileOpen(false);
-                    await logout();
-                    navigate(appRoute("/auth"));
-                  }}
-                  className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[13px] text-rose-500 hover:bg-rose-50/50"
+            <p className="px-2 py-1.5 text-xs font-semibold uppercase tracking-wide text-ink-faint">
+              Zhyra Summary
+            </p>
+            {notifications.length === 0 ? (
+              <p className="px-2 py-3 text-center text-[13px] text-ink-faint">
+                No new notifications
+              </p>
+            ) : (
+              notifications.map((n, i) => (
+                <div
+                  key={i}
+                  className="rounded-lg px-2 py-2 text-[13px] leading-snug text-ink-soft hover:bg-canvas-alt"
                 >
-                  Logout
-                </button>
-              </motion.div>
+                  {n}
+                </div>
+              ))
             )}
-          </AnimatePresence>
-        </div>
-      </div>
-    </header>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+
+    {/* Profile */}
+    <div className="relative">
+      <button
+        onClick={() => setProfileOpen((v) => !v)}
+        className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-[#2F6BFF] to-[#8B7CF6] text-xs font-semibold text-white transition-transform hover:scale-[1.03] active:scale-[0.97]"
+      >
+        {userInitials}
+      </button>
+
+      <AnimatePresence>
+        {profileOpen && (
+          <motion.div
+            initial={{ opacity: 0, y: 6, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 6, scale: 0.98 }}
+            transition={{ duration: 0.15 }}
+            className="absolute right-0 top-11 w-48 rounded-xl border border-line bg-surface p-1.5 shadow-soft-lg"
+          >
+            <div className="px-2.5 py-2 text-left">
+              <p className="text-[13px] font-semibold text-ink leading-tight">
+                {user?.name || "Member"}
+              </p>
+              <p className="text-[11px] text-ink-faint leading-normal truncate">
+                {user?.email}
+              </p>
+            </div>
+            <div className="my-1 h-px bg-line" />
+            <button
+              onClick={async () => {
+                setProfileOpen(false);
+                await logout();
+                navigate(appRoute("/auth"));
+              }}
+              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[13px] text-rose-500 hover:bg-rose-50/50"
+            >
+              Logout
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  </div>
+</header>
   );
 }
 

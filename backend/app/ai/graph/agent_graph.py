@@ -143,8 +143,9 @@ async def generate_response_node(state: AgentState) -> Dict[str, Any]:
     model_name = overrides.get("model") or provider_settings.get("model", "gemini-3.5-flash")
     provider_name = provider_settings.get("provider", "gemini")
 
+    safe_ai_text = ai_text or ""
     from app.services.conversation_service import ConversationService
-    tool_call = ConversationService._parse_tool_call(ai_text)
+    tool_call = ConversationService._parse_tool_call(safe_ai_text)
 
     try:
         from app.database.firestore import firestore_client
@@ -152,7 +153,7 @@ async def generate_response_node(state: AgentState) -> Dict[str, Any]:
         
         sys_tokens = ContextBudgetManager.estimate_tokens(system_prompt)
         prompt_tokens = ContextBudgetManager.estimate_tokens(prompt)
-        output_tokens = ContextBudgetManager.estimate_tokens(ai_text)
+        output_tokens = ContextBudgetManager.estimate_tokens(safe_ai_text)
         
         convo_tokens = ContextBudgetManager.estimate_tokens(packet_data.get("conversation_history", "")) if packet_data else prompt_tokens
         mem_tokens = ContextBudgetManager.estimate_tokens(packet_data.get("memory_context", "")) if packet_data else 0

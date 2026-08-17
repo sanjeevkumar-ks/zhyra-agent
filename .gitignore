@@ -78,3 +78,5 @@ firebase-debug.*.log
 
 # ─── Design Docs (not for production repo) ───────────────────────────────────
 Comixo-Flash-Design-System.md
+.vercel
+.env*
