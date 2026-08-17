@@ -71,13 +71,13 @@ class MockFirestoreClient:
     def _save(self):
         try:
             with open(self.file_path, "w") as f:
-                json.dump(self._db, f, indent=2)
+                json.dump(self._db, f, indent=2, default=str)
         except OSError:
             # Fallback to /tmp if working directory is read-only (e.g. Vercel)
             try:
                 tmp_path = os.path.join("/tmp", os.path.basename(self.file_path))
                 with open(tmp_path, "w") as f:
-                    json.dump(self._db, f, indent=2)
+                    json.dump(self._db, f, indent=2, default=str)
                 self.file_path = tmp_path
             except Exception as e:
                 log_error("Failed to save mock firestore database file in /tmp", exc=e)

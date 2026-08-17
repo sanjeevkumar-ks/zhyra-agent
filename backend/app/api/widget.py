@@ -235,8 +235,10 @@ async def send_widget_message(
         "time": time.strftime("%H:%M")
     }
     try:
+        snap = convo_ref.get()
+        curr_msgs = snap.to_dict().get("messages", []) if (snap and snap.exists) else []
         convo_ref.update({
-            "messages": ArrayUnion([user_msg_doc]),
+            "messages": curr_msgs + [user_msg_doc],
             "preview": user_text[:60],
             "updated_at": time.time()
         })
@@ -274,11 +276,16 @@ async def send_widget_message(
             "actions": actions,
             "time": time.strftime("%H:%M")
         }
-        convo_ref.update({
-            "messages": ArrayUnion([agent_msg_doc]),
-            "preview": reply_text[:60],
-            "updated_at": time.time()
-        })
+        try:
+            snap2 = convo_ref.get()
+            curr_msgs2 = snap2.to_dict().get("messages", []) if (snap2 and snap2.exists) else []
+            convo_ref.update({
+                "messages": curr_msgs2 + [agent_msg_doc],
+                "preview": reply_text[:60],
+                "updated_at": time.time()
+            })
+        except Exception as ex:
+            log_error("Failed to append agent reply to Firestore", exc=ex)
 
         AnalyticsService.record_event(
             workspace_id=workspace_id,
