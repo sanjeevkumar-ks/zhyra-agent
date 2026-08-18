@@ -53,6 +53,7 @@ async def widget_health():
     return {"status": "ok"}
 
 @router.post("/session")
+@router.post("/chat/session")
 async def create_widget_session(payload: dict, request: Request, response: Response):
     """Initializes a new public widget session after origin allowlist and agent validation."""
     origin = request.headers.get("origin") or payload.get("origin") or ""

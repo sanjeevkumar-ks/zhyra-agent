@@ -118,6 +118,7 @@ app.include_router(context.router, prefix="/api/context", tags=["Context Optimiz
 app.include_router(notifications.router, prefix="/api/notifications", tags=["Notifications"])
 app.include_router(widget.router, prefix="/api/widget", tags=["Embeddable Widget"])
 app.include_router(widget.router, prefix="/api/chat", tags=["Widget Chat Alias"])
+app.include_router(widget.router, prefix="/api", tags=["Widget Direct Alias"])
 
 @app.get("/", tags=["Health"])
 @app.get("/health", tags=["Health"])
