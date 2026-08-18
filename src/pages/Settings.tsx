@@ -5,8 +5,11 @@ import { useAuthStore } from "../store/useAuthStore";
 import { apiClient } from "../lib/apiClient";
 import { AskZhyraChip, Badge, Button, PageHeader, Panel } from "../components/ui";
 
+import AdminUsersSettings from "./admin/AdminUsersSettings";
+
 const sections = [
   { key: "workspace", label: "Workspace", icon: Building2 },
+  { key: "admin-users", label: "Admin Users", icon: ShieldCheck },
   { key: "providers", label: "AI Providers", icon: KeyRound },
   { key: "security", label: "Security", icon: ShieldCheck },
   { key: "billing", label: "Billing", icon: CreditCard },
@@ -141,6 +144,8 @@ export default function Settings() {
               </Panel>
             </>
           )}
+
+          {active === "admin-users" && <AdminUsersSettings />}
 
           {active === "providers" && <ProvidersSection />}
 

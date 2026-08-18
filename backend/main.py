@@ -15,6 +15,12 @@ from app.api import (
     knowledge, voice, settings, providers, integrations,
     billing, analytics, memory, team, workflows, context, notifications, widget
 )
+from app.api.admin import (
+    auth as admin_auth,
+    users as admin_users,
+    invites as admin_invites,
+    audit as admin_audit
+)
 
 app = FastAPI(
     title="Zhyra AI OS API",
@@ -36,8 +42,10 @@ _allowed_origins = [
     "http://127.0.0.1:3000",
     "http://127.0.0.1:5500",
     "https://zhyra.web.app",
+    "https://zhyra-admin.web.app",
     "https://zhyra-e0d80.web.app",
     "https://zhyra-e0d80.firebaseapp.com",
+    "https://zhyra-admin.firebaseapp.com",
 ]
 
 for orig in [_frontend_url] + _env_origins:
@@ -119,6 +127,10 @@ app.include_router(notifications.router, prefix="/api/notifications", tags=["Not
 app.include_router(widget.router, prefix="/api/widget", tags=["Embeddable Widget"])
 app.include_router(widget.router, prefix="/api/chat", tags=["Widget Chat Alias"])
 app.include_router(widget.router, prefix="/api", tags=["Widget Direct Alias"])
+app.include_router(admin_auth.router, prefix="/api/admin/auth", tags=["Admin Auth"])
+app.include_router(admin_users.router, prefix="/api/admin/users", tags=["Admin Users"])
+app.include_router(admin_invites.router, prefix="/api/admin/invites", tags=["Admin Invites"])
+app.include_router(admin_audit.router, prefix="/api/admin", tags=["Admin Audit"])
 
 @app.get("/", tags=["Health"])
 @app.get("/health", tags=["Health"])
