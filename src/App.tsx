@@ -25,6 +25,8 @@ import OnboardingPage from "./pages/OnboardingPage";
 import AdminLoginPage from "./pages/admin/AdminLoginPage";
 import AdminAccessDenied from "./pages/admin/AdminAccessDenied";
 import AdminVerifyEmail from "./pages/admin/AdminVerifyEmail";
+import AdminDashboard from "./pages/admin/AdminDashboard";
+import AdminUsersSettings from "./pages/admin/AdminUsersSettings";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -197,9 +199,9 @@ function MainRoutes() {
             </AdminGuard>
           }
         >
-          <Route index element={<Workspace />} />
-          <Route path="users" element={<Workspace />} />
-          <Route path="workspaces" element={<Workspace />} />
+          <Route index element={isAdminDomain ? <AdminDashboard /> : <Workspace />} />
+          <Route path="users" element={isAdminDomain ? <AdminUsersSettings /> : <Workspace />} />
+          <Route path="workspaces" element={isAdminDomain ? <AdminDashboard /> : <Workspace />} />
           <Route path="agents" element={<Agents />} />
           <Route path="agents/:id" element={<AgentWorkspace />} />
           <Route path="knowledge" element={<Knowledge />} />
@@ -208,10 +210,10 @@ function MainRoutes() {
           <Route path="issues" element={<Conversations />} />
           <Route path="analytics" element={<Analytics />} />
           <Route path="integrations" element={<Integrations />} />
-          <Route path="activity" element={<Analytics />} />
+          <Route path="activity" element={isAdminDomain ? <AdminDashboard /> : <Analytics />} />
           <Route path="memory" element={<MemoryPage />} />
           <Route path="team" element={<Team />} />
-          <Route path="settings" element={<Settings />} />
+          <Route path="settings" element={isAdminDomain ? <AdminUsersSettings /> : <Settings />} />
           <Route path="testing" element={<Testing />} />
           <Route path="voice-studio" element={<VoiceStudio />} />
         </Route>

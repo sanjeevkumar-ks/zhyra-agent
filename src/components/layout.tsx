@@ -23,13 +23,25 @@ import {
   Check,
   ArrowRight,
   AudioLines,
+  Shield,
+  Building2,
+  Activity,
+  AlertTriangle,
+  LogOut,
 } from "lucide-react";
 import { cn } from "../utils/cn";
 import { appRoute } from "../lib/routes";
 import { Avatar, Badge } from "./ui";
 import { useAuthStore } from "../store/useAuthStore";
+import { useAdminAuthStore } from "../store/useAdminAuthStore";
 import { apiClient } from "../lib/apiClient";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+
+const isAdminDomain =
+  typeof window !== "undefined" &&
+  (window.location.hostname.includes("zhyra-admin") ||
+    window.location.hostname.includes("admin") ||
+    window.location.search.includes("admin=true"));
 
 const nav = [
   { to: appRoute(""), label: "Workspace", icon: LayoutGrid, end: true },
@@ -42,6 +54,17 @@ const nav = [
   { to: appRoute("/memory"), label: "Memory", icon: BrainCircuit },
   { to: appRoute("/team"), label: "Team", icon: Users },
   { to: appRoute("/voice-studio"), label: "Voice Studio", icon: AudioLines },
+  { to: appRoute("/settings"), label: "Settings", icon: Settings },
+];
+
+const adminNav = [
+  { to: appRoute(""), label: "Overview", icon: LayoutGrid, end: true },
+  { to: appRoute("/users"), label: "Administrators", icon: Shield },
+  { to: appRoute("/workspaces"), label: "Workspaces", icon: Building2 },
+  { to: appRoute("/agents"), label: "Agents", icon: Bot },
+  { to: appRoute("/conversations"), label: "Conversations", icon: MessagesSquare },
+  { to: appRoute("/issues"), label: "System Issues", icon: AlertTriangle },
+  { to: appRoute("/activity"), label: "Activity Audit", icon: Activity },
   { to: appRoute("/settings"), label: "Settings", icon: Settings },
 ];
 
@@ -78,16 +101,21 @@ export function Sidebar({
 }) {
   const [wsOpen, setWsOpen] = useState(false);
   const { user, workspace } = useAuthStore();
+  const { adminProfile } = useAdminAuthStore();
+
+  const activeNav = isAdminDomain ? adminNav : nav;
   
-  const workspaceInitials = workspace?.name
-    ? workspace.name
-        .split(" ")
-        .map((w) => w[0])
-        .filter(Boolean)
-        .join("")
-        .toUpperCase()
-        .slice(0, 2)
-    : "AC";
+  const workspaceInitials = isAdminDomain
+    ? (adminProfile?.displayName || adminProfile?.email || "AD").slice(0, 2).toUpperCase()
+    : workspace?.name
+        ? workspace.name
+            .split(" ")
+            .map((w) => w[0])
+            .filter(Boolean)
+            .join("")
+            .toUpperCase()
+            .slice(0, 2)
+        : "AC";
 
   return (
     <aside
@@ -100,13 +128,15 @@ export function Sidebar({
         <ZhyraMark />
         {!collapsed && (
           <div className="leading-tight">
-            <p className="text-[13.5px] font-semibold tracking-tight text-ink">Zhyra AI OS</p>
+            <p className="text-[13.5px] font-semibold tracking-tight text-ink">
+              {isAdminDomain ? "Zhyra Admin Console" : "Zhyra AI OS"}
+            </p>
           </div>
         )}
       </div>
 
       <nav className="mt-8 flex flex-1 flex-col gap-0.5 px-3">
-        {nav.map((item) => (
+        {activeNav.map((item) => (
           <NavLink
             key={item.to}
             to={item.to}
@@ -210,6 +240,7 @@ export function Topbar({ onSearch, title, onToggleSidebar }: { onSearch: () => v
   const ref = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
   const { user, logout } = useAuthStore();
+  const { adminProfile, logout: adminLogout } = useAdminAuthStore();
 
   useEffect(() => {
     function onClick(e: MouseEvent) {
@@ -223,15 +254,17 @@ export function Topbar({ onSearch, title, onToggleSidebar }: { onSearch: () => v
     return () => document.removeEventListener("mousedown", onClick);
   }, []);
 
-  const userInitials = user?.name
-    ? user.name
-        .split(" ")
-        .map((w) => w[0])
-        .filter(Boolean)
-        .join("")
-        .toUpperCase()
-        .slice(0, 2)
-    : "PS";
+  const userInitials = isAdminDomain
+    ? (adminProfile?.displayName || adminProfile?.email || "AD").slice(0, 2).toUpperCase()
+    : user?.name
+        ? user.name
+            .split(" ")
+            .map((w) => w[0])
+            .filter(Boolean)
+            .join("")
+            .toUpperCase()
+            .slice(0, 2)
+        : "PS";
     
   const queryClient = useQueryClient();
   const { data: notifications = [] } = useQuery<any[]>({
@@ -403,22 +436,33 @@ export function Topbar({ onSearch, title, onToggleSidebar }: { onSearch: () => v
           >
             <div className="px-2.5 py-2 text-left">
               <p className="text-[13px] font-semibold text-ink leading-tight">
-                {user?.name || "Member"}
+                {isAdminDomain ? adminProfile?.displayName || "Admin User" : user?.name || "Member"}
               </p>
               <p className="text-[11px] text-ink-faint leading-normal truncate">
-                {user?.email}
+                {isAdminDomain ? adminProfile?.email : user?.email}
               </p>
+              {isAdminDomain && (
+                <span className="mt-1.5 inline-block rounded-md bg-blue-500/10 px-2 py-0.5 text-[10.5px] font-semibold text-blue-500 capitalize">
+                  {adminProfile?.role?.replace("_", " ") || "Super Admin"}
+                </span>
+              )}
             </div>
             <div className="my-1 h-px bg-line" />
             <button
               onClick={async () => {
                 setProfileOpen(false);
-                await logout();
-                navigate(appRoute("/auth"));
+                if (isAdminDomain) {
+                  await adminLogout();
+                  navigate("/login");
+                } else {
+                  await logout();
+                  navigate(appRoute("/auth"));
+                }
               }}
               className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[13px] text-rose-500 hover:bg-rose-50/50"
             >
-              Logout
+              <LogOut size={14} />
+              Sign Out
             </button>
           </motion.div>
         )}
