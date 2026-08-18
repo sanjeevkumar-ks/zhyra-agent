@@ -1,13 +1,5 @@
 import { initializeApp } from "firebase/app";
-import {
-  initializeAuth,
-  getAuth,
-  GoogleAuthProvider,
-  indexedDBLocalPersistence,
-  browserLocalPersistence,
-  browserSessionPersistence,
-  inMemoryPersistence,
-} from "firebase/auth";
+import { getAuth, GoogleAuthProvider } from "firebase/auth";
 
 // Your web app's Firebase configuration
 const firebaseConfig = {
@@ -20,24 +12,8 @@ const firebaseConfig = {
   measurementId: "G-Q8XQK5XHNV",
 };
 
-// Initialize Firebase App
+// Initialize Firebase App & Auth
 export const app = initializeApp(firebaseConfig);
-
-// Safe Auth Initialization with fallback persistence to prevent "Database is closing/hidden" errors
-let authInstance;
-try {
-  authInstance = initializeAuth(app, {
-    persistence: [
-      indexedDBLocalPersistence,
-      browserLocalPersistence,
-      browserSessionPersistence,
-      inMemoryPersistence,
-    ],
-  });
-} catch (e) {
-  authInstance = getAuth(app);
-}
-
-export const auth = authInstance;
+export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({ prompt: "select_account" });
