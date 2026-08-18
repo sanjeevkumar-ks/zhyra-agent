@@ -1,5 +1,10 @@
 import { initializeApp } from "firebase/app";
-import { getAuth, GoogleAuthProvider } from "firebase/auth";
+import {
+  getAuth,
+  GoogleAuthProvider,
+  setPersistence,
+  browserLocalPersistence,
+} from "firebase/auth";
 
 // Your web app's Firebase configuration
 const firebaseConfig = {
@@ -15,5 +20,11 @@ const firebaseConfig = {
 // Initialize Firebase App & Auth
 export const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
+
+// Explicitly set browserLocalPersistence (localStorage) to prevent IndexedDB tab-hidden/database closing crashes
+setPersistence(auth, browserLocalPersistence).catch((err) => {
+  console.warn("Firebase setPersistence warning:", err);
+});
+
 export const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({ prompt: "select_account" });

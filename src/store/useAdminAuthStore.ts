@@ -6,6 +6,9 @@ import {
   createUserWithEmailAndPassword,
   sendEmailVerification,
   signOut,
+  setPersistence,
+  browserLocalPersistence,
+  inMemoryPersistence,
   User as FirebaseUser,
 } from "firebase/auth";
 import { auth, googleProvider } from "../../firebase";
@@ -172,12 +175,37 @@ export const useAdminAuthStore = create<AdminAuthState>((set, get) => ({
   loginWithGoogle: async () => {
     set({ loading: true, error: null });
     try {
+      await setPersistence(auth, browserLocalPersistence).catch(() => {});
       const res = await signInWithPopup(auth, googleProvider);
       if (res.user) {
         await get().checkAdminStatus(res.user);
       }
     } catch (e: any) {
       console.error("Google Admin Sign-in Error:", e);
+      
+      // Fallback 1: If auth.currentUser exists despite popup IndexedDB error
+      if (auth.currentUser) {
+        await get().checkAdminStatus(auth.currentUser);
+        return;
+      }
+
+      // Fallback 2: Handle IndexedDB database closing/hidden error
+      if (e?.message?.includes("closing") || e?.message?.includes("hidden") || e?.code === "auth/internal-error") {
+        try {
+          await setPersistence(auth, inMemoryPersistence);
+          const resRetry = await signInWithPopup(auth, googleProvider);
+          if (resRetry.user) {
+            await get().checkAdminStatus(resRetry.user);
+            return;
+          }
+        } catch (retryErr: any) {
+          if (auth.currentUser) {
+            await get().checkAdminStatus(auth.currentUser);
+            return;
+          }
+        }
+      }
+
       set({ loading: false, error: e.message || "Google sign-in failed." });
     }
   },
@@ -185,12 +213,35 @@ export const useAdminAuthStore = create<AdminAuthState>((set, get) => ({
   loginWithEmail: async (email: string, pass: string) => {
     set({ loading: true, error: null });
     try {
+      await setPersistence(auth, browserLocalPersistence).catch(() => {});
       const res = await signInWithEmailAndPassword(auth, email, pass);
       if (res.user) {
         await get().checkAdminStatus(res.user);
       }
     } catch (e: any) {
       console.error("Email Admin Sign-in Error:", e);
+
+      if (auth.currentUser) {
+        await get().checkAdminStatus(auth.currentUser);
+        return;
+      }
+
+      if (e?.message?.includes("closing") || e?.message?.includes("hidden") || e?.code === "auth/internal-error") {
+        try {
+          await setPersistence(auth, inMemoryPersistence);
+          const resRetry = await signInWithEmailAndPassword(auth, email, pass);
+          if (resRetry.user) {
+            await get().checkAdminStatus(resRetry.user);
+            return;
+          }
+        } catch (retryErr: any) {
+          if (auth.currentUser) {
+            await get().checkAdminStatus(auth.currentUser);
+            return;
+          }
+        }
+      }
+
       set({ loading: false, error: e.message || "Invalid email or password." });
     }
   },
@@ -198,6 +249,7 @@ export const useAdminAuthStore = create<AdminAuthState>((set, get) => ({
   signUpWithEmail: async (email: string, pass: string) => {
     set({ loading: true, error: null });
     try {
+      await setPersistence(auth, browserLocalPersistence).catch(() => {});
       const res = await createUserWithEmailAndPassword(auth, email, pass);
       if (res.user) {
         await sendEmailVerification(res.user);
@@ -213,6 +265,21 @@ export const useAdminAuthStore = create<AdminAuthState>((set, get) => ({
       }
     } catch (e: any) {
       console.error("Email Admin Sign-up Error:", e);
+
+      if (auth.currentUser) {
+        await sendEmailVerification(auth.currentUser).catch(() => {});
+        set({
+          user: auth.currentUser,
+          adminProfile: null,
+          permissions: [],
+          loading: false,
+          isDenied: false,
+          isUnverified: true,
+          error: "Verification email sent. Please check your inbox and verify your email address.",
+        });
+        return;
+      }
+
       set({ loading: false, error: e.message || "Account creation failed." });
     }
   },
