@@ -5,7 +5,12 @@
   "targets": {
     "zhyra-e0d80": {
       "hosting": {
-        "zhyra": ["zhyra"]
+        "zhyra": [
+          "zhyra"
+        ],
+        "admin": [
+          "zhyra-admin"
+        ]
       }
     }
   }
