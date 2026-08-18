@@ -2,7 +2,7 @@
   "hosting": [
     {
       "target": "zhyra",
-      "public": "dist",
+      "public": "dist/customer",
       "ignore": [
         "firebase.json",
         "**/.*",
@@ -79,7 +79,7 @@
     },
     {
       "target": "admin",
-      "public": "dist",
+      "public": "dist/admin",
       "ignore": [
         "firebase.json",
         "**/.*",

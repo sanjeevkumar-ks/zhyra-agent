@@ -2,7 +2,6 @@ import { useEffect } from "react";
 import { HashRouter, Routes, Route, Outlet, useLocation, Navigate } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useAuthStore } from "./store/useAuthStore";
-import { useAdminAuthStore } from "./store/useAdminAuthStore";
 import { AppShell } from "./components/layout";
 import Workspace from "./pages/Workspace";
 import Agents from "./pages/Agents";
@@ -21,13 +20,6 @@ import LandingPage from "./pages/LandingPage";
 import AuthPage from "./pages/AuthPage";
 import OnboardingPage from "./pages/OnboardingPage";
 
-// Admin Pages
-import AdminLoginPage from "./pages/admin/AdminLoginPage";
-import AdminAccessDenied from "./pages/admin/AdminAccessDenied";
-import AdminVerifyEmail from "./pages/admin/AdminVerifyEmail";
-import AdminDashboard from "./pages/admin/AdminDashboard";
-import AdminUsersSettings from "./pages/admin/AdminUsersSettings";
-
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
@@ -39,16 +31,12 @@ const queryClient = new QueryClient({
 
 const titles: Record<string, string> = {
   "/": "Workspace",
-  "/users": "Users & Admins",
-  "/workspaces": "Workspaces",
   "/agents": "Agents",
   "/knowledge": "Knowledge Hub",
   "/workflows": "Workflow Builder",
   "/conversations": "Conversations",
-  "/issues": "System Issues",
   "/analytics": "Analytics",
   "/integrations": "Integrations",
-  "/activity": "Activity Audit",
   "/memory": "AI Memory",
   "/team": "Team",
   "/settings": "Settings",
@@ -56,37 +44,22 @@ const titles: Record<string, string> = {
   "/voice-studio": "Voice Studio",
 };
 
-// Check if running on Admin domain (e.g. zhyra-admin.web.app)
-const isAdminDomain =
-  typeof window !== "undefined" &&
-  (window.location.hostname.includes("zhyra-admin") ||
-    window.location.hostname.includes("admin") ||
-    window.location.search.includes("admin=true"));
-
-function AdminGuard({ children }: { children: React.ReactNode }) {
-  const { user, adminProfile, loading, isDenied, isUnverified } = useAdminAuthStore();
+function AuthGuard({ children }: { children: React.ReactNode }) {
+  const { user, loading } = useAuthStore();
 
   if (loading) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[#0B0F17] text-white">
         <div className="flex flex-col items-center gap-4">
           <div className="h-10 w-10 animate-spin rounded-full border-2 border-blue-500/20 border-t-blue-500" />
-          <p className="text-[13px] text-slate-400 font-medium">Verifying administrator authorization...</p>
+          <p className="text-[13px] text-slate-400 font-medium">Loading workspace...</p>
         </div>
       </div>
     );
   }
 
   if (!user) {
-    return <Navigate to="/login" replace />;
-  }
-
-  if (isUnverified) {
-    return <Navigate to="/verify-email" replace />;
-  }
-
-  if (isDenied || !adminProfile) {
-    return <Navigate to="/access-denied" replace />;
+    return <Navigate to="/signin" replace />;
   }
 
   return <>{children}</>;
@@ -94,17 +67,9 @@ function AdminGuard({ children }: { children: React.ReactNode }) {
 
 function DashboardLayout() {
   const location = useLocation();
-  const { user: normalUser } = useAuthStore();
-  const { adminProfile } = useAdminAuthStore();
-
   const localPath = location.pathname.replace(/^\/app/, "") || "/";
   const base = "/" + (localPath.split("/")[1] ?? "");
-  const title = titles[base] ?? (localPath.startsWith("/agents/") ? "Agent Workspace" : "Zhyra Admin Console");
-
-  // Allow either normal user authentication or admin user authorization
-  if (!normalUser && !adminProfile) {
-    return <Navigate to="/login" replace />;
-  }
+  const title = titles[base] ?? (localPath.startsWith("/agents/") ? "Agent Workspace" : "Zhyra AI OS");
 
   return (
     <AppShell title={title}>
@@ -114,24 +79,19 @@ function DashboardLayout() {
 }
 
 function MainRoutes() {
-  const { initialize: initCustomer, loading: customerLoading } = useAuthStore();
-  const { initialize: initAdmin, loading: adminLoading } = useAdminAuthStore();
+  const { initialize, loading } = useAuthStore();
 
   useEffect(() => {
-    const unsubCustomer = initCustomer();
-    const unsubAdmin = initAdmin();
-    return () => {
-      unsubCustomer();
-      unsubAdmin();
-    };
-  }, [initCustomer, initAdmin]);
+    const unsub = initialize();
+    return () => unsub();
+  }, [initialize]);
 
-  if (customerLoading && adminLoading) {
+  if (loading) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[#0B0F17] text-white">
         <div className="flex flex-col items-center gap-4">
           <div className="h-12 w-12 animate-spin rounded-full border-[3px] border-slate-700 border-t-blue-500" />
-          <p className="text-[13.5px] font-medium text-slate-400">Loading Zhyra Admin...</p>
+          <p className="text-[13.5px] font-medium text-slate-400">Loading Zhyra AI OS...</p>
         </div>
       </div>
     );
@@ -140,82 +100,33 @@ function MainRoutes() {
   return (
     <HashRouter>
       <Routes>
-        {/* Admin Direct Routes */}
-        <Route path="/login" element={<AdminLoginPage />} />
-        <Route path="/access-denied" element={<AdminAccessDenied />} />
-        <Route path="/verify-email" element={<AdminVerifyEmail />} />
+        <Route path="/" element={<LandingPage />} />
+        <Route path="/signin" element={<AuthPage mode="signin" />} />
+        <Route path="/signup" element={<AuthPage mode="signup" />} />
+        <Route path="/onboarding" element={<OnboardingPage />} />
 
-        {/* 
-          On Admin domain (zhyra-admin.web.app), Landing Page and Onboarding are completely removed.
-          Root '/' redirects directly to '/app' which requires Admin authentication.
-        */}
-        <Route
-          path="/"
-          element={
-            isAdminDomain ? (
-              <Navigate to="/app" replace />
-            ) : (
-              <LandingPage />
-            )
-          }
-        />
-        <Route
-          path="/signin"
-          element={
-            isAdminDomain ? (
-              <Navigate to="/login" replace />
-            ) : (
-              <AuthPage mode="signin" />
-            )
-          }
-        />
-        <Route
-          path="/signup"
-          element={
-            isAdminDomain ? (
-              <Navigate to="/login" replace />
-            ) : (
-              <AuthPage mode="signup" />
-            )
-          }
-        />
-        <Route
-          path="/onboarding"
-          element={
-            isAdminDomain ? (
-              <Navigate to="/app" replace />
-            ) : (
-              <OnboardingPage />
-            )
-          }
-        />
-
-        {/* Protected Application Routes */}
+        {/* Protected Customer Workspace Routes */}
         <Route
           path="/app"
           element={
-            <AdminGuard>
+            <AuthGuard>
               <DashboardLayout />
-            </AdminGuard>
+            </AuthGuard>
           }
         >
-          <Route index element={isAdminDomain ? <AdminDashboard /> : <Workspace />} />
-          <Route path="users" element={isAdminDomain ? <AdminUsersSettings /> : <Workspace />} />
-          <Route path="workspaces" element={isAdminDomain ? <AdminDashboard /> : <Workspace />} />
-          <Route path="agents" element={isAdminDomain ? <AdminDashboard /> : <Agents />} />
-          <Route path="agents/:id" element={isAdminDomain ? <AdminDashboard /> : <AgentWorkspace />} />
-          <Route path="knowledge" element={isAdminDomain ? <AdminDashboard /> : <Knowledge />} />
-          <Route path="workflows" element={isAdminDomain ? <AdminDashboard /> : <Workflows />} />
-          <Route path="conversations" element={isAdminDomain ? <AdminDashboard /> : <Conversations />} />
-          <Route path="issues" element={isAdminDomain ? <AdminDashboard /> : <Conversations />} />
-          <Route path="analytics" element={isAdminDomain ? <AdminDashboard /> : <Analytics />} />
-          <Route path="integrations" element={isAdminDomain ? <AdminDashboard /> : <Integrations />} />
-          <Route path="activity" element={isAdminDomain ? <AdminDashboard /> : <Analytics />} />
-          <Route path="memory" element={isAdminDomain ? <AdminDashboard /> : <MemoryPage />} />
-          <Route path="team" element={isAdminDomain ? <AdminDashboard /> : <Team />} />
-          <Route path="settings" element={isAdminDomain ? <AdminUsersSettings /> : <Settings />} />
-          <Route path="testing" element={isAdminDomain ? <AdminDashboard /> : <Testing />} />
-          <Route path="voice-studio" element={isAdminDomain ? <AdminDashboard /> : <VoiceStudio />} />
+          <Route index element={<Workspace />} />
+          <Route path="agents" element={<Agents />} />
+          <Route path="agents/:id" element={<AgentWorkspace />} />
+          <Route path="knowledge" element={<Knowledge />} />
+          <Route path="workflows" element={<Workflows />} />
+          <Route path="conversations" element={<Conversations />} />
+          <Route path="analytics" element={<Analytics />} />
+          <Route path="integrations" element={<Integrations />} />
+          <Route path="memory" element={<MemoryPage />} />
+          <Route path="team" element={<Team />} />
+          <Route path="settings" element={<Settings />} />
+          <Route path="testing" element={<Testing />} />
+          <Route path="voice-studio" element={<VoiceStudio />} />
         </Route>
 
         <Route path="*" element={<Navigate to="/app" replace />} />

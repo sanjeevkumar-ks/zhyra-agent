@@ -19,7 +19,15 @@ from app.api.admin import (
     auth as admin_auth,
     users as admin_users,
     invites as admin_invites,
-    audit as admin_audit
+    audit as admin_audit,
+    overview as admin_overview,
+    customers as admin_customers,
+    workspaces as admin_workspaces,
+    agents as admin_agents,
+    conversations as admin_conversations,
+    issues as admin_issues,
+    integrations as admin_integrations,
+    health as admin_health,
 )
 
 app = FastAPI(
@@ -131,6 +139,14 @@ app.include_router(admin_auth.router, prefix="/api/admin/auth", tags=["Admin Aut
 app.include_router(admin_users.router, prefix="/api/admin/users", tags=["Admin Users"])
 app.include_router(admin_invites.router, prefix="/api/admin/invites", tags=["Admin Invites"])
 app.include_router(admin_audit.router, prefix="/api/admin", tags=["Admin Audit"])
+app.include_router(admin_overview.router, prefix="/api/admin", tags=["Admin Overview"])
+app.include_router(admin_customers.router, prefix="/api/admin/customers", tags=["Admin Customers"])
+app.include_router(admin_workspaces.router, prefix="/api/admin/workspaces", tags=["Admin Workspaces"])
+app.include_router(admin_agents.router, prefix="/api/admin/agents", tags=["Admin Agents"])
+app.include_router(admin_conversations.router, prefix="/api/admin/conversations", tags=["Admin Conversations"])
+app.include_router(admin_issues.router, prefix="/api/admin/issues", tags=["Admin Issues"])
+app.include_router(admin_integrations.router, prefix="/api/admin/integrations", tags=["Admin Integrations"])
+app.include_router(admin_health.router, prefix="/api/admin/health", tags=["Admin Health"])
 
 @app.get("/", tags=["Health"])
 @app.get("/health", tags=["Health"])
