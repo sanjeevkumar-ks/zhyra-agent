@@ -37,16 +37,6 @@ def validate_domain_allowlist(origin: str, allowed_domains: List[str]) -> bool:
 
     return False
 
-@router.options("/{path:path}")
-async def widget_cors_preflight(request: Request, response: Response):
-    """Dynamically handles CORS preflight request for third-party websites."""
-    origin = request.headers.get("origin", "*")
-    response.headers["Access-Control-Allow-Origin"] = origin
-    response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
-    response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Requested-With"
-    response.headers["Access-Control-Max-Age"] = "86400"
-    return Response(status_code=204)
-
 @router.get("/health")
 async def widget_health():
     """Health check endpoint for widget backend."""
