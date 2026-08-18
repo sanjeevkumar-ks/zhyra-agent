@@ -59,8 +59,8 @@ async def create_widget_session(payload: dict, request: Request, response: Respo
     response.headers["Access-Control-Allow-Origin"] = origin if origin else "*"
     response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
 
-    agent_id = payload.get("agent_id")
-    workspace_id = payload.get("workspace_id")
+    agent_id = payload.get("agent_id") or payload.get("agentId")
+    workspace_id = payload.get("workspace_id") or payload.get("workspaceId")
 
     if not agent_id or not workspace_id:
         raise HTTPException(

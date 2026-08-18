@@ -26,6 +26,23 @@
         ]
       },
       {
+        "source": "/api/**",
+        "headers": [
+          {
+            "key": "Access-Control-Allow-Origin",
+            "value": "*"
+          },
+          {
+            "key": "Access-Control-Allow-Methods",
+            "value": "GET, POST, OPTIONS, PUT, DELETE, PATCH"
+          },
+          {
+            "key": "Access-Control-Allow-Headers",
+            "value": "Content-Type, Authorization, X-Requested-With, sec-ch-ua, sec-ch-ua-mobile, sec-ch-ua-platform"
+          }
+        ]
+      },
+      {
         "source": "**/*.@(js|css|woff2|woff|ttf|eot)",
         "headers": [
           {

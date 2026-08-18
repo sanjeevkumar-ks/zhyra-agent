@@ -117,6 +117,7 @@ app.include_router(team.router, prefix="/api/team", tags=["Team"])
 app.include_router(context.router, prefix="/api/context", tags=["Context Optimization"])
 app.include_router(notifications.router, prefix="/api/notifications", tags=["Notifications"])
 app.include_router(widget.router, prefix="/api/widget", tags=["Embeddable Widget"])
+app.include_router(widget.router, prefix="/api/chat", tags=["Widget Chat Alias"])
 
 @app.get("/", tags=["Health"])
 @app.get("/health", tags=["Health"])
