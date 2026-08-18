@@ -1,10 +1,13 @@
-// Import the functions you need from the SDKs you need
 import { initializeApp } from "firebase/app";
-import { getAnalytics } from "firebase/analytics";
-// TODO: Add SDKs for Firebase products that you want to use
-// https://firebase.google.com/docs/web/setup#available-libraries
-
-import { getAuth, GoogleAuthProvider } from "firebase/auth";
+import {
+  initializeAuth,
+  getAuth,
+  GoogleAuthProvider,
+  indexedDBLocalPersistence,
+  browserLocalPersistence,
+  browserSessionPersistence,
+  inMemoryPersistence,
+} from "firebase/auth";
 
 // Your web app's Firebase configuration
 const firebaseConfig = {
@@ -14,10 +17,27 @@ const firebaseConfig = {
   storageBucket: "zhyra-e0d80.firebasestorage.app",
   messagingSenderId: "517923074552",
   appId: "1:517923074552:web:eff1a6e25a820c76dfa60d",
-  measurementId: "G-Q8XQK5XHNV"
+  measurementId: "G-Q8XQK5XHNV",
 };
 
-// Initialize Firebase
+// Initialize Firebase App
 export const app = initializeApp(firebaseConfig);
-export const auth = getAuth(app);
+
+// Safe Auth Initialization with fallback persistence to prevent "Database is closing/hidden" errors
+let authInstance;
+try {
+  authInstance = initializeAuth(app, {
+    persistence: [
+      indexedDBLocalPersistence,
+      browserLocalPersistence,
+      browserSessionPersistence,
+      inMemoryPersistence,
+    ],
+  });
+} catch (e) {
+  authInstance = getAuth(app);
+}
+
+export const auth = authInstance;
 export const googleProvider = new GoogleAuthProvider();
+googleProvider.setCustomParameters({ prompt: "select_account" });

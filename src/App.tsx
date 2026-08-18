@@ -54,6 +54,13 @@ const titles: Record<string, string> = {
   "/voice-studio": "Voice Studio",
 };
 
+// Check if running on Admin domain (e.g. zhyra-admin.web.app)
+const isAdminDomain =
+  typeof window !== "undefined" &&
+  (window.location.hostname.includes("zhyra-admin") ||
+    window.location.hostname.includes("admin") ||
+    window.location.search.includes("admin=true"));
+
 function AdminGuard({ children }: { children: React.ReactNode }) {
   const { user, adminProfile, loading, isDenied, isUnverified } = useAdminAuthStore();
 
@@ -122,7 +129,7 @@ function MainRoutes() {
       <div className="flex min-h-screen items-center justify-center bg-[#0B0F17] text-white">
         <div className="flex flex-col items-center gap-4">
           <div className="h-12 w-12 animate-spin rounded-full border-[3px] border-slate-700 border-t-blue-500" />
-          <p className="text-[13.5px] font-medium text-slate-400">Loading Zhyra OS...</p>
+          <p className="text-[13.5px] font-medium text-slate-400">Loading Zhyra Admin...</p>
         </div>
       </div>
     );
@@ -136,14 +143,60 @@ function MainRoutes() {
         <Route path="/access-denied" element={<AdminAccessDenied />} />
         <Route path="/verify-email" element={<AdminVerifyEmail />} />
 
-        {/* Customer Auth & Landing */}
-        <Route path="/" element={<LandingPage />} />
-        <Route path="/signin" element={<AuthPage mode="signin" />} />
-        <Route path="/signup" element={<AuthPage mode="signup" />} />
-        <Route path="/onboarding" element={<OnboardingPage />} />
+        {/* 
+          On Admin domain (zhyra-admin.web.app), Landing Page and Onboarding are completely removed.
+          Root '/' redirects directly to '/app' which requires Admin authentication.
+        */}
+        <Route
+          path="/"
+          element={
+            isAdminDomain ? (
+              <Navigate to="/app" replace />
+            ) : (
+              <LandingPage />
+            )
+          }
+        />
+        <Route
+          path="/signin"
+          element={
+            isAdminDomain ? (
+              <Navigate to="/login" replace />
+            ) : (
+              <AuthPage mode="signin" />
+            )
+          }
+        />
+        <Route
+          path="/signup"
+          element={
+            isAdminDomain ? (
+              <Navigate to="/login" replace />
+            ) : (
+              <AuthPage mode="signup" />
+            )
+          }
+        />
+        <Route
+          path="/onboarding"
+          element={
+            isAdminDomain ? (
+              <Navigate to="/app" replace />
+            ) : (
+              <OnboardingPage />
+            )
+          }
+        />
 
         {/* Protected Application Routes */}
-        <Route path="/app" element={<AdminGuard><DashboardLayout /></AdminGuard>}>
+        <Route
+          path="/app"
+          element={
+            <AdminGuard>
+              <DashboardLayout />
+            </AdminGuard>
+          }
+        >
           <Route index element={<Workspace />} />
           <Route path="users" element={<Workspace />} />
           <Route path="workspaces" element={<Workspace />} />

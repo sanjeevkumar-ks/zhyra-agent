@@ -178,6 +178,19 @@ export const useAdminAuthStore = create<AdminAuthState>((set, get) => ({
       }
     } catch (e: any) {
       console.error("Google Admin Sign-in Error:", e);
+      if (e?.message?.includes("closing") || e?.code === "auth/internal-error") {
+        try {
+          const { setPersistence, inMemoryPersistence } = await import("firebase/auth");
+          await setPersistence(auth, inMemoryPersistence);
+          const resRetry = await signInWithPopup(auth, googleProvider);
+          if (resRetry.user) {
+            await get().checkAdminStatus(resRetry.user);
+            return;
+          }
+        } catch (retryErr: any) {
+          console.error("Fallback Google Sign-in Error:", retryErr);
+        }
+      }
       set({ loading: false, error: e.message || "Google sign-in failed." });
     }
   },
@@ -191,6 +204,19 @@ export const useAdminAuthStore = create<AdminAuthState>((set, get) => ({
       }
     } catch (e: any) {
       console.error("Email Admin Sign-in Error:", e);
+      if (e?.message?.includes("closing") || e?.code === "auth/internal-error") {
+        try {
+          const { setPersistence, inMemoryPersistence } = await import("firebase/auth");
+          await setPersistence(auth, inMemoryPersistence);
+          const resRetry = await signInWithEmailAndPassword(auth, email, pass);
+          if (resRetry.user) {
+            await get().checkAdminStatus(resRetry.user);
+            return;
+          }
+        } catch (retryErr: any) {
+          console.error("Fallback Email Sign-in Error:", retryErr);
+        }
+      }
       set({ loading: false, error: e.message || "Invalid email or password." });
     }
   },
@@ -213,6 +239,28 @@ export const useAdminAuthStore = create<AdminAuthState>((set, get) => ({
       }
     } catch (e: any) {
       console.error("Email Admin Sign-up Error:", e);
+      if (e?.message?.includes("closing") || e?.code === "auth/internal-error") {
+        try {
+          const { setPersistence, inMemoryPersistence } = await import("firebase/auth");
+          await setPersistence(auth, inMemoryPersistence);
+          const resRetry = await createUserWithEmailAndPassword(auth, email, pass);
+          if (resRetry.user) {
+            await sendEmailVerification(resRetry.user);
+            set({
+              user: resRetry.user,
+              adminProfile: null,
+              permissions: [],
+              loading: false,
+              isDenied: false,
+              isUnverified: true,
+              error: "Verification email sent. Please check your inbox and verify your email address.",
+            });
+            return;
+          }
+        } catch (retryErr: any) {
+          console.error("Fallback Email Sign-up Error:", retryErr);
+        }
+      }
       set({ loading: false, error: e.message || "Account creation failed." });
     }
   },
