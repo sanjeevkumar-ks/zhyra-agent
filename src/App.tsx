@@ -202,20 +202,20 @@ function MainRoutes() {
           <Route index element={isAdminDomain ? <AdminDashboard /> : <Workspace />} />
           <Route path="users" element={isAdminDomain ? <AdminUsersSettings /> : <Workspace />} />
           <Route path="workspaces" element={isAdminDomain ? <AdminDashboard /> : <Workspace />} />
-          <Route path="agents" element={<Agents />} />
-          <Route path="agents/:id" element={<AgentWorkspace />} />
-          <Route path="knowledge" element={<Knowledge />} />
-          <Route path="workflows" element={<Workflows />} />
-          <Route path="conversations" element={<Conversations />} />
-          <Route path="issues" element={<Conversations />} />
-          <Route path="analytics" element={<Analytics />} />
-          <Route path="integrations" element={<Integrations />} />
+          <Route path="agents" element={isAdminDomain ? <AdminDashboard /> : <Agents />} />
+          <Route path="agents/:id" element={isAdminDomain ? <AdminDashboard /> : <AgentWorkspace />} />
+          <Route path="knowledge" element={isAdminDomain ? <AdminDashboard /> : <Knowledge />} />
+          <Route path="workflows" element={isAdminDomain ? <AdminDashboard /> : <Workflows />} />
+          <Route path="conversations" element={isAdminDomain ? <AdminDashboard /> : <Conversations />} />
+          <Route path="issues" element={isAdminDomain ? <AdminDashboard /> : <Conversations />} />
+          <Route path="analytics" element={isAdminDomain ? <AdminDashboard /> : <Analytics />} />
+          <Route path="integrations" element={isAdminDomain ? <AdminDashboard /> : <Integrations />} />
           <Route path="activity" element={isAdminDomain ? <AdminDashboard /> : <Analytics />} />
-          <Route path="memory" element={<MemoryPage />} />
-          <Route path="team" element={<Team />} />
+          <Route path="memory" element={isAdminDomain ? <AdminDashboard /> : <MemoryPage />} />
+          <Route path="team" element={isAdminDomain ? <AdminDashboard /> : <Team />} />
           <Route path="settings" element={isAdminDomain ? <AdminUsersSettings /> : <Settings />} />
-          <Route path="testing" element={<Testing />} />
-          <Route path="voice-studio" element={<VoiceStudio />} />
+          <Route path="testing" element={isAdminDomain ? <AdminDashboard /> : <Testing />} />
+          <Route path="voice-studio" element={isAdminDomain ? <AdminDashboard /> : <VoiceStudio />} />
         </Route>
 
         <Route path="*" element={<Navigate to="/app" replace />} />
