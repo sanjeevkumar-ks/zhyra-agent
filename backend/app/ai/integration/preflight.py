@@ -1,12 +1,10 @@
-from typing import Dict, Any, Tuple
-import time
-from app.database.firestore import firestore_client
-from app.integrations.credential_store import load_credentials
+from typing import Dict, Any
+from app.integrations.resolver import IntegrationResolver
 from app.utils.logger import log_info, log_error
 
 class PreflightResult:
     def __init__(self, status: str, message: str, details: Dict[str, Any] = None):
-        self.status = status  # READY | REAUTH_REQUIRED | API_DISABLED | PERMISSION_DENIED | NOT_CONNECTED | CONFIGURATION_ERROR | PROVIDER_ERROR
+        self.status = status  # READY | NOT_ASSIGNED_TO_AGENT | NOT_CONNECTED | REAUTH_REQUIRED | TOKEN_EXPIRED | TOKEN_REFRESH_FAILED | API_DISABLED | PROVIDER_ERROR
         self.message = message
         self.details = details or {}
 
@@ -26,142 +24,28 @@ class IntegrationPreflight:
         integration_id: str
     ) -> PreflightResult:
         """
-        Executes preflight validation checks before routing execution calls to integration.
-        Checks Firestore status, credentials existence, OAuth scopes, and provider availability.
+        Non-blocking preflight validation check.
+        Uses centralized IntegrationResolver to verify agent tool assignment,
+        workspace connection, and token validity without blocking LLM retrieval.
         """
-        # 1. Fetch Agent data & check permissions
-        if agent_id != "unknown":
-            try:
-                agent_ref = firestore_client.collection("agents").document(agent_id)
-                agent_snap = agent_ref.get()
-                if not agent_snap.exists:
-                    return PreflightResult("CONFIGURATION_ERROR", "Agent configuration missing.")
-                
-                agent_data = agent_snap.to_dict()
-                if agent_data.get("workspace_id") != workspace_id:
-                    return PreflightResult("PERMISSION_DENIED", "Agent does not belong to this workspace.")
-
-                # Filter integration tools strictly by agent assignment
-                agent_tools = agent_data.get("tools", [])
-                mapped_names = {
-                    "int_gcal": ["google calendar", "calendar", "gcal"],
-                    "int_gmail": ["gmail", "email"],
-                    "int_gdrive": ["google drive", "gdrive", "drive"],
-                    "int_gmeet": ["google meet", "gmeet", "meet"],
-                    "int_slack": ["slack"],
-                    "int_whatsapp": ["whatsapp", "whatsapp business"],
-                    "int_hubspot": ["hubspot", "crm"],
-                    "int_shopify": ["shopify", "commerce", "store"],
-                    "int_razorpay": ["razorpay", "payment", "payments"],
-                    "int_google_maps": ["google maps", "maps"],
-                    "int_elevenlabs": ["elevenlabs", "voice"],
-                    "int_fcm": ["firebase", "fcm", "notifications"],
-                    "int_rest_api": ["rest api", "custom api", "api"]
-                }
-                labels = mapped_names.get(integration_id, [integration_id])
-                
-                # If agent explicitly lists tools, check against mapped names or integration_id
-                if agent_tools:
-                    has_permission = False
-                    for label in labels + [integration_id]:
-                        for tool in agent_tools:
-                            t_lower = str(tool).lower()
-                            l_lower = str(label).lower()
-                            if l_lower in t_lower or t_lower in l_lower:
-                                has_permission = True
-                                break
-                        if has_permission:
-                            break
-                    # If tools array is non-empty but doesn't mention specific integration, allow if agent has no strict restriction
-                    if not has_permission and not any(k in [t.lower() for t in agent_tools] for k in ["int_gcal", "int_gmail", "int_gdrive", "int_slack"]):
-                        has_permission = True
-                    if not has_permission:
-                        return PreflightResult("PERMISSION_DENIED", f"Agent does not have permission to execute {integration_id}.")
-            except Exception as e:
-                log_error(f"Preflight agent check failed for {integration_id}", exc=e)
-                return PreflightResult("CONFIGURATION_ERROR", f"Error checking agent permissions: {str(e)}")
-
-        # 2. Check integration connection state in Firestore
         try:
-            doc_ref = firestore_client.collection("integrations").document(f"{workspace_id}_{integration_id}")
-            snap = doc_ref.get()
-            
-            # Fallback stream query if ID mapping differs
-            data = None
-            if snap.exists:
-                data = snap.to_dict()
+            status_code, message, details = await IntegrationResolver.resolve_integration_connection(
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                provider_or_tool=integration_id
+            )
+
+            if status_code == "CONNECTED":
+                return PreflightResult("READY", "Integration is connected and ready.", details)
+            elif status_code == "NOT_ASSIGNED_TO_AGENT":
+                return PreflightResult("NOT_ASSIGNED_TO_AGENT", message, details)
+            elif status_code in ["TOKEN_EXPIRED", "TOKEN_REFRESH_FAILED"]:
+                return PreflightResult("REAUTH_REQUIRED", message, details)
+            elif status_code == "DISCONNECTED":
+                return PreflightResult("NOT_CONNECTED", message, details)
             else:
-                docs = firestore_client.collection("integrations").stream()
-                for d in docs:
-                    ddata = d.to_dict()
-                    if ddata.get("workspace_id") == workspace_id and ddata.get("id") == integration_id:
-                        data = ddata
-                        break
-            
-            if not data or not data.get("connected"):
-                return PreflightResult("NOT_CONNECTED", f"Integration {integration_id} is not connected.")
+                return PreflightResult("PROVIDER_ERROR", message, details)
+
         except Exception as e:
-            log_error(f"Preflight Firestore status query failed for {integration_id}", exc=e)
-            return PreflightResult("CONFIGURATION_ERROR", "Failed to check integration status.")
-
-        # 3. Check credentials existence and load encrypted tokens
-        creds = load_credentials(workspace_id, integration_id)
-        if not creds:
-            return PreflightResult("NOT_CONNECTED", "Credentials missing from store.")
-
-        # 4. Check OAuth expiry and token refresh
-        is_oauth = integration_id in {"int_gcal", "int_gmail", "int_slack", "int_hubspot", "int_shopify"}
-        if is_oauth:
-            # Check refresh token
-            if not creds.get("refresh_token") and integration_id != "int_shopify":  # Shopify uses permanent tokens
-                return PreflightResult("REAUTH_REQUIRED", "Refresh token missing. Re-authorization required.")
-
-            # Validate scopes if available
-            if "scope" in creds:
-                scopes = creds.get("scope") or ""
-                # Google specific scope check
-                if integration_id == "int_gcal":
-                    required = ["calendar.events", "calendar"]
-                    if not any(req in scopes for req in required):
-                        return PreflightResult("REAUTH_REQUIRED", "Required Google Calendar OAuth scopes missing.")
-
-            # Check if token needs refresh by performing validation test via provider
-            from app.services.integration_service import IntegrationService
-            provider = IntegrationService._get_provider(integration_id)
-            if not provider:
-                return PreflightResult("CONFIGURATION_ERROR", f"No provider found for {integration_id}.")
-
-            is_valid = await provider.validate(data.get("config", {}), creds)
-            if not is_valid:
-                log_info(f"Token invalid for {integration_id}. Attempting automatic preflight refresh.")
-                refreshed = await provider.refresh(workspace_id)
-                if not refreshed or not refreshed.get("access_token"):
-                    return PreflightResult("REAUTH_REQUIRED", "Token expired. Auto-refresh failed.")
-                
-                # Reload refreshed tokens
-                creds = load_credentials(workspace_id, integration_id)
-
-        # 5. Accessibility validation check (Dry-run list call or test)
-        try:
-            from app.services.integration_service import IntegrationService
-            provider = IntegrationService._get_provider(integration_id)
-            
-            # Google Calendar-specific checks
-            if integration_id == "int_gcal":
-                service = provider._get_calendar_service(creds)
-                try:
-                    # Retrieve primary calendar list to check read/write access and API status
-                    service.calendarList().get(calendarId="primary").execute()
-                except Exception as api_err:
-                    err_msg = str(api_err).lower()
-                    if "disabled" in err_msg or "not enabled" in err_msg or "403" in err_msg:
-                        return PreflightResult("API_DISABLED", "Google Calendar API is not enabled in the developer console.")
-                    elif "invalid credentials" in err_msg or "401" in err_msg:
-                        return PreflightResult("REAUTH_REQUIRED", "Access token is invalid or has been revoked.")
-                    else:
-                        return PreflightResult("PROVIDER_ERROR", f"Google Calendar API error: {str(api_err)}")
-        except Exception as e:
-            log_error(f"API accessibility verification failed for {integration_id}", exc=e)
-            return PreflightResult("PROVIDER_ERROR", f"Failed to access provider API: {str(e)}")
-
-        return PreflightResult("READY", "Integration is ready for execution.")
+            log_error(f"Preflight check failed for integration {integration_id}", exc=e)
+            return PreflightResult("PROVIDER_ERROR", f"Preflight error: {str(e)}")

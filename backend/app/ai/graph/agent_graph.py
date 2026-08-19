@@ -102,8 +102,18 @@ async def generate_response_node(state: AgentState) -> Dict[str, Any]:
         system_prompt += tools_instructions
         prompt = f"Conversational History:\n{history_summary}\nContext documents/policies:\n{state['context']}\n\n"
 
+    import datetime
+    from zoneinfo import ZoneInfo
+    now_tz = datetime.datetime.now(ZoneInfo("Asia/Kolkata"))
+    dt_str = now_tz.strftime("%A, %B %d, %Y %I:%M %p %Z")
+    system_prompt += f"\n\n[CURRENT DATETIME CONTEXT]\nCurrent Date & Time: {dt_str}\nTimezone: Asia/Kolkata\n"
+
     system_prompt += (
-        "\n\nFormatting Guidelines:\n"
+        "\n[TOOL EXECUTION RULES]\n"
+        "- Never claim an action (like scheduling a meeting or sending an email) was completed unless a TOOL_RESULT with success: true and a valid resource ID is returned.\n"
+        "- When issuing a TOOL_CALL, output ONLY the TOOL_CALL block without asserting that the action has already succeeded.\n"
+        "- If TOOL_RESULT indicates failure or if an integration is not connected, state clearly that the action could not be completed.\n\n"
+        "Formatting Guidelines:\n"
         "- Never reply with a single dense paragraph.\n"
         "- Break your response into short, readable paragraphs (maximum 2-3 sentences each).\n"
         "- Use bullet points or numbered lists where appropriate to list details, steps, or features.\n"
@@ -282,7 +292,30 @@ async def execute_tool_node(state: AgentState) -> Dict[str, Any]:
 
     actions = list(state.get("actions", []))
     actions.append(f"{tool_name}: {method_name} called")
-    
+
+    # Record issue to Firestore if tool execution failed
+    if normalized_result.get("success") is False:
+        try:
+            import time
+            issue_ref = firestore_client.collection("issues").document()
+            issue_ref.set({
+                "id": issue_ref.id,
+                "workspace_id": state["workspace_id"],
+                "agent_id": state["agent_id"],
+                "agent_name": state["agent_data"].get("name", "Agent"),
+                "title": f"{tool_name} Action Failed: {normalized_result.get('error_code', 'ERROR')}",
+                "severity": "high" if normalized_result.get("error_code") in ["REAUTH_REQUIRED", "TOKEN_EXPIRED"] else "medium",
+                "status": "open",
+                "integration": integration_id,
+                "occurrences": 1,
+                "first_detected": time.time(),
+                "last_detected": time.time(),
+                "error_details": normalized_result.get("message") or "Tool execution failed.",
+                "timestamp": time.time()
+            })
+        except Exception as err:
+            log_error("Failed to log issue to Firestore", exc=err)
+
     return {
         "tool_result": normalized_result,
         "actions": actions,
@@ -297,10 +330,29 @@ def should_execute_tool(state: AgentState) -> str:
 
 async def finalize_node(state: AgentState) -> Dict[str, Any]:
     """Cleans up raw tool block text and classifies final response intent."""
-    ai_text = state["ai_text"]
-    if "TOOL_CALL:" in ai_text:
-        lines = [l for l in ai_text.split("\n") if not l.strip().startswith("TOOL_CALL:")]
-        ai_text = "\n".join(lines).strip()
+    from app.services.conversation_service import ConversationService
+    ai_text = ConversationService.sanitize_tool_call_text(state.get("ai_text", ""))
+
+    # Handle tool_result state verification
+    if state.get("tool_result"):
+        res = state["tool_result"]
+        is_success = res.get("success", False)
+        if is_success:
+            tool_name = str(res.get("tool", "")).lower()
+            if not ai_text:
+                if "calendar" in tool_name or "gcal" in tool_name or "event" in tool_name:
+                    ai_text = "Done — I've scheduled your meeting."
+                elif "email" in tool_name or "gmail" in tool_name:
+                    ai_text = "Done — I've sent the email."
+                elif "slack" in tool_name:
+                    ai_text = "Done — I've sent the message to Slack."
+                else:
+                    ai_text = "Action completed successfully."
+        else:
+            err_msg = res.get("message") or "Tool execution failed."
+            success_kws = ["created", "scheduled", "added", "booked", "done — i've", "i've scheduled", "i've created"]
+            if not ai_text or any(kw in ai_text.lower() for kw in success_kws):
+                ai_text = f"I couldn't complete the action because: {err_msg}"
 
     # Query lower for classification
     query_lower = state["user_query"].lower()

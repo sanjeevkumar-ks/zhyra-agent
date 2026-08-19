@@ -20,6 +20,7 @@ import {
   Wrench,
 } from "lucide-react";
 import { AskZhyraChip, Avatar, Badge, Button, PageHeader, Panel } from "../components/ui";
+import MessageBlockRenderer from "../components/MessageBlockRenderer";
 
 const sampleQuestions = [
   "Can I reschedule my Thursday appointment to next week?",
@@ -31,6 +32,7 @@ type ChatMessage = {
   id: string;
   role: "user" | "agent";
   content: string;
+  blocks?: any[];
   streaming?: boolean;
   meta?: {
     confidence?: number;
@@ -124,12 +126,15 @@ export default function Testing() {
 
       const finalConvo = await apiClient.get<any>(`/api/conversations/${convo.id}`);
       setActiveConvo(finalConvo);
+      const lastMsg = finalConvo.messages?.[finalConvo.messages.length - 1];
       setMessages((prev) =>
         prev.map((m) =>
           m.id === agentMsgId
             ? {
                 ...m,
                 streaming: false,
+                content: lastMsg?.text || accumulated,
+                blocks: lastMsg?.blocks || [],
                 meta: {
                   confidence: finalConvo.confidence,
                   intent: finalConvo.intent,
@@ -315,7 +320,7 @@ export default function Testing() {
                       {m.streaming && !m.content ? (
                         <TypingDots />
                       ) : (
-                        <p className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{m.content}</p>
+                        <MessageBlockRenderer blocks={m.blocks} rawText={m.content} from={m.role === "user" ? "customer" : "agent"} />
                       )}
                     </div>
 

@@ -383,6 +383,32 @@ class ConversationService:
             return ""
 
     @staticmethod
+    def sanitize_tool_call_text(text: str) -> str:
+        """
+        Strips any raw tool call strings, markdown bold **TOOL_CALL**:, XML tags,
+        or JSON blocks from natural language assistant messages before returning to UI.
+        """
+        if not text:
+            return ""
+
+        import re
+        clean_text = re.sub(r"(?:\*\*)?TOOL_CALL(?:\*\*)?:\s*\{.*?\}(?=\n|$|\s)", "", text, flags=re.DOTALL)
+        clean_text = re.sub(r"(?:\*\*)?TOOL_CALL(?:\*\*)?:.*$", "", clean_text, flags=re.MULTILINE)
+        clean_text = re.sub(r"(?:<\|tool_call\|>|<tool_call\|>).*?(?:<\|/tool_call\|>|</tool_call\|>)?", "", clean_text, flags=re.DOTALL)
+        clean_text = re.sub(r"call:[\w\.]+\(.*?\)", "", clean_text, flags=re.DOTALL)
+        clean_text = re.sub(r"```(?:json)?\s*\{[\s\S]*?\"tool\"[\s\S]*?\}\s*```", "", clean_text)
+
+        lines = []
+        for line in clean_text.split("\n"):
+            s_line = line.strip()
+            if "TOOL_CALL" in s_line or "tool_call" in s_line.lower():
+                if s_line.startswith("**TOOL_CALL**") or s_line.startswith("TOOL_CALL") or s_line.startswith("{\"tool\""):
+                    continue
+            lines.append(line)
+
+        return "\n".join(lines).strip()
+
+    @staticmethod
     def _parse_tool_call(text: str) -> Optional[dict]:
         """Checks if response contains a tool call and returns parsed dict."""
         import json
@@ -391,56 +417,56 @@ class ConversationService:
         if not text:
             return None
 
-        # 1. TOOL_CALL: format
-        if "TOOL_CALL:" in text:
+        clean_upper = text.upper()
+        # 1. TOOL_CALL / **TOOL_CALL** format
+        if "TOOL_CALL" in clean_upper:
             try:
-                start = text.find("TOOL_CALL:") + 10
-                raw = text[start:].strip()
-                # Clean code blocks
-                if raw.startswith("```"):
-                    raw = re.sub(r"^```(?:json)?\s*", "", raw)
-                    raw = re.sub(r"\s*```$", "", raw).strip()
-                
-                parsed = None
-                # Extract first valid JSON object
-                if raw.startswith("{"):
-                    open_braces = 0
-                    end_idx = -1
-                    for i, char in enumerate(raw):
-                        if char == "{":
-                            open_braces += 1
-                        elif char == "}":
-                            open_braces -= 1
-                            if open_braces == 0:
-                                end_idx = i + 1
-                                break
-                    if end_idx != -1:
-                        json_str = raw[:end_idx]
-                        parsed = json.loads(json_str)
-                else:
-                    line = raw.split("\n")[0].strip()
-                    parsed = json.loads(line)
+                match = re.search(r"(?:\*\*)?TOOL_CALL(?:\*\*)?:\s*", text)
+                if match:
+                    raw = text[match.end():].strip()
+                    if raw.startswith("```"):
+                        raw = re.sub(r"^```(?:json)?\s*", "", raw)
+                        raw = re.sub(r"\s*```$", "", raw).strip()
 
-                if isinstance(parsed, dict):
-                    tool_val = parsed.get("tool") or parsed.get("name") or ""
-                    method_val = parsed.get("method", "")
-                    args_val = parsed.get("args") if "args" in parsed else parsed.get("arguments", {})
-                    
-                    if "_" in tool_val and not method_val:
-                        if tool_val.startswith("calendar_"):
-                            method_val = tool_val.replace("calendar_", "")
-                            tool_val = "GoogleCalendar"
-                        elif tool_val.startswith("gmail_"):
-                            method_val = tool_val.replace("gmail_", "")
-                            tool_val = "Gmail"
-                        elif tool_val.startswith("gdrive_"):
-                            method_val = tool_val.replace("gdrive_", "")
-                            tool_val = "GoogleDrive"
-                        elif tool_val.startswith("slack_"):
-                            method_val = tool_val.replace("slack_", "")
-                            tool_val = "Slack"
+                    parsed = None
+                    if raw.startswith("{"):
+                        open_braces = 0
+                        end_idx = -1
+                        for i, char in enumerate(raw):
+                            if char == "{":
+                                open_braces += 1
+                            elif char == "}":
+                                open_braces -= 1
+                                if open_braces == 0:
+                                    end_idx = i + 1
+                                    break
+                        if end_idx != -1:
+                            json_str = raw[:end_idx]
+                            parsed = json.loads(json_str)
+                    else:
+                        line = raw.split("\n")[0].strip()
+                        parsed = json.loads(line)
 
-                    return {"tool": tool_val, "method": method_val, "args": args_val}
+                    if isinstance(parsed, dict):
+                        tool_val = parsed.get("tool") or parsed.get("name") or ""
+                        method_val = parsed.get("method", "")
+                        args_val = parsed.get("args") if "args" in parsed else parsed.get("arguments", {})
+
+                        if "_" in tool_val and not method_val:
+                            if tool_val.startswith("calendar_"):
+                                method_val = tool_val.replace("calendar_", "")
+                                tool_val = "GoogleCalendar"
+                            elif tool_val.startswith("gmail_"):
+                                method_val = tool_val.replace("gmail_", "")
+                                tool_val = "Gmail"
+                            elif tool_val.startswith("gdrive_"):
+                                method_val = tool_val.replace("gdrive_", "")
+                                tool_val = "GoogleDrive"
+                            elif tool_val.startswith("slack_"):
+                                method_val = tool_val.replace("slack_", "")
+                                tool_val = "Slack"
+
+                        return {"tool": tool_val, "method": method_val, "args": args_val}
             except Exception:
                 pass
 
@@ -449,14 +475,14 @@ class ConversationService:
         if tool_call_match:
             full_target = tool_call_match.group(1)
             raw_args = tool_call_match.group(2).strip()
-            
+
             tool_name = full_target
             method_name = "execute"
             if "." in full_target:
                 parts = full_target.split(".")
                 tool_name = parts[0]
                 method_name = parts[1]
-                
+
             parsed_args = {}
             if raw_args:
                 try:
@@ -465,7 +491,7 @@ class ConversationService:
                     kv_pairs = re.findall(r"(\w+)\s*=\s*['\"]?(.*?)['\"]?(?:,\s*|$)", raw_args)
                     for k, v in kv_pairs:
                         parsed_args[k] = v.rstrip("'\"")
-                        
+
             return {"tool": tool_name, "method": method_name, "args": parsed_args}
 
         return None

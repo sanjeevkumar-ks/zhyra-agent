@@ -11,5 +11,7 @@
         "redirect_uri": "http://localhost:8000/api/integrations/oauth/callback/google"
       }
     }
-  }
+  },
+  "integration_credentials": {},
+  "integrations": {}
 }

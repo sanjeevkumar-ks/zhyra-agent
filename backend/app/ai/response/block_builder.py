@@ -7,7 +7,7 @@ class ResponseBlockBuilder:
         return ResponseBlock(type="text", data={"text": text})
 
     @staticmethod
-    def calendar_event(title: str, date: str, time: str, status: str = "created", event_id: str = None) -> ResponseBlock:
+    def calendar_event(title: str, date: str, time: str, status: str = "created", event_id: str = None, url: str = None, timezone: str = None) -> ResponseBlock:
         return ResponseBlock(
             type="calendar_event",
             data={
@@ -15,7 +15,9 @@ class ResponseBlockBuilder:
                 "date": date,
                 "time": time,
                 "status": status,
-                "event_id": event_id
+                "event_id": event_id,
+                "url": url,
+                "timezone": timezone
             }
         )
 
@@ -31,13 +33,14 @@ class ResponseBlockBuilder:
         )
 
     @staticmethod
-    def integration_error(provider: str, status: str, action: str) -> ResponseBlock:
+    def integration_error(provider: str, status: str, action: str, message: str = "") -> ResponseBlock:
         return ResponseBlock(
             type="integration_error",
             data={
                 "provider": provider,
                 "status": status,
-                "action": action
+                "action": action,
+                "message": message
             }
         )
 

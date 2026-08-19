@@ -18,6 +18,7 @@ import {
   MessageSquare,
 } from "lucide-react";
 import { AskZhyraChip, Avatar, Badge, Button } from "../components/ui";
+import MessageBlockRenderer from "../components/MessageBlockRenderer";
 
 const statusTone: Record<string, "emerald" | "accent" | "rose"> = {
   resolved: "emerald",
@@ -29,6 +30,7 @@ interface LocalMessage {
   id: string;
   from: "customer" | "agent" | "human";
   text: string;
+  blocks?: any[];
 }
 
 type Mode = "live" | "test";
@@ -180,6 +182,7 @@ function ConversationWorkspace({
         id: m.id || `${idx}`,
         from: m.sender_type === "human" ? "human" : m.sender_type === "customer" ? "customer" : "agent",
         text: m.text,
+        blocks: m.blocks || [],
       }));
       setLocalMessages(mapped);
     } else {
@@ -449,11 +452,13 @@ function ConversationWorkspace({
             localMessages.map((m) => (
               <div key={m.id} className={`flex ${m.from === "customer" ? "justify-start" : "justify-end"}`}>
                 <div
-                  className={`max-w-[70%] whitespace-pre-wrap rounded-2xl px-4 py-2.5 text-[13.5px] leading-relaxed shadow-sm ${
-                    m.from === "customer" ? "bg-canvas-alt text-ink" : "bg-ink text-white animate-fade-in"
+                  className={`max-w-[75%] rounded-2xl px-4 py-3 text-[13.5px] leading-relaxed shadow-sm ${
+                    m.from === "customer" ? "bg-canvas-alt text-ink" : "bg-[#0B0F17] border border-line text-white animate-fade-in"
                   }`}
                 >
-                  {m.text || (
+                  {m.text || (m.blocks && m.blocks.length > 0) ? (
+                    <MessageBlockRenderer blocks={m.blocks} rawText={m.text} from={m.from} />
+                  ) : (
                     <span className="flex items-center gap-1 py-0.5 animate-pulse">
                       <span className="h-1.5 w-1.5 rounded-full bg-white/70" />
                       <span className="h-1.5 w-1.5 rounded-full bg-white/70" style={{ animationDelay: "0.2s" }} />

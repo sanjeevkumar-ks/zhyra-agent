@@ -31,13 +31,22 @@ class ToolResultNormalizer:
         # Google Calendar normalization
         if "calendar" in tool_lower or "gcal" in tool_lower:
             if "create" in method_lower or "schedule" in method_lower:
+                event_id = data.get("id") or data.get("event_id")
+                if not event_id or event_id == "unknown_id":
+                    return cls.normalize_error(
+                        tool_name=tool_name,
+                        method=method,
+                        error_code="INVALID_EVENT_ID",
+                        message="Google Calendar API call did not return a valid event ID."
+                    )
+
                 # Extract event creation fields
                 return {
                     "success": True,
-                    "event_id": data.get("id") or data.get("event_id") or "unknown_id",
+                    "event_id": event_id,
                     "title": data.get("summary") or data.get("title") or "New Event",
-                    "start": data.get("start", {}).get("dateTime", data.get("start", {}).get("date", "Tomorrow")),
-                    "end": data.get("end", {}).get("dateTime", data.get("end", {}).get("date", "Tomorrow")),
+                    "start": data.get("start", {}).get("dateTime", data.get("start", {}).get("date", "")),
+                    "end": data.get("end", {}).get("dateTime", data.get("end", {}).get("date", "")),
                     "link": data.get("htmlLink", data.get("link", "")),
                     "calendar": data.get("calendar_id", "primary")
                 }

@@ -297,3 +297,47 @@ async def oauth_callback(
         log_error(f"OAuth callback failed for {provider}", exc=e)
         redirect_url = f"{FRONTEND_BASE_URL}/integrations?oauth_error=server_error"
         return RedirectResponse(url=redirect_url)
+
+
+@router.get("/google-calendar/diagnostics")
+async def get_google_calendar_diagnostics(
+    request: Request,
+    workspace_id: str = Depends(get_user_workspace_id),
+    agent_id: str = Query("default")
+):
+    """
+    Returns real safe diagnostic metadata for Google Calendar connection troubleshooting.
+    NEVER returns raw credentials or tokens.
+    """
+    from app.integrations.resolver import IntegrationResolver
+    from app.integrations.credential_store import load_credentials
+    from app.integrations.oauth_helpers import GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, get_google_redirect_uri
+
+    status_code, message, details = await IntegrationResolver.resolve_integration_connection(
+        workspace_id=workspace_id,
+        agent_id=agent_id,
+        provider_or_tool="int_gcal"
+    )
+
+    creds = load_credentials(workspace_id, "int_gcal") or {}
+    has_access_token = bool(creds.get("access_token"))
+    has_refresh_token = bool(creds.get("refresh_token"))
+    redirect_uri = get_google_redirect_uri(request)
+
+    return {
+        "provider": "google_calendar",
+        "integration_id": "int_gcal",
+        "workspace_id": workspace_id,
+        "agent_id": agent_id,
+        "google_oauth_configured": bool(GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET),
+        "google_redirect_uri_configured": bool(os.getenv("GOOGLE_REDIRECT_URI")),
+        "redirect_uri": redirect_uri,
+        "connection_status": status_code,
+        "message": message,
+        "workspace_connected": status_code not in ["DISCONNECTED"],
+        "agent_assigned": status_code != "NOT_ASSIGNED_TO_AGENT",
+        "has_access_token": has_access_token,
+        "token_refresh_available": has_refresh_token,
+        "details": details
+    }
+
