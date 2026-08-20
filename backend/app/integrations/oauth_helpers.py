@@ -323,6 +323,8 @@ async def exchange_google_code(code: str, state: str) -> Dict:
         "access_token": tokens.get("access_token", ""),
         "refresh_token": tokens.get("refresh_token", ""),
         "expires_in": tokens.get("expires_in", 3600),
+        "expires_at": time.time() + int(tokens.get("expires_in", 3600)),
+        "client_id": GOOGLE_CLIENT_ID,
         "scope": tokens.get("scope") or " ".join(GOOGLE_SCOPES.get(state_data["integration_id"], [])),
         "token_type": tokens.get("token_type", "Bearer"),
         "email": email,
@@ -446,10 +448,40 @@ async def exchange_shopify_code(code: str, state: str) -> Dict:
 
 # ─── Token Refresh ────────────────────────────────────────────────────────────
 
+class GoogleOAuthRefreshError(Exception):
+    """
+    Raised when a Google OAuth token refresh fails in a *permanent* way that
+    requires the user to re-authorize (wrong OAuth client, revoked consent, etc.).
+
+    ``code`` is one of the Google token endpoint error codes, e.g.
+    ``unauthorized_client`` or ``invalid_grant``. Callers must surface these as
+    REAUTH_REQUIRED — never as a generic/retryable failure and never as success.
+    """
+
+    def __init__(self, code: str, message: str = ""):
+        self.code = code
+        self.message = message or code
+        super().__init__(f"Google OAuth refresh failed: {self.message} ({self.code})")
+
+
+# Google token endpoint error codes that indicate the stored credentials can
+# never be refreshed and the account must be reconnected.
+PERMANENT_GOOGLE_REFRESH_CODES = {
+    "unauthorized_client",   # refresh token belongs to a different GOOGLE_CLIENT_ID
+    "invalid_grant",         # token revoked / expired / belongs to a different user
+    "invalid_client",        # client id/secret mismatch
+    "access_denied",
+}
+
 async def refresh_google_token(refresh_token: str) -> Dict:
     """
     Use a Google refresh token to get a new access token.
-    Returns new token dict with access_token and expires_in.
+    Returns new token dict with access_token, expires_in and expires_at.
+
+    Raises ``GoogleOAuthRefreshError`` for permanent failures that require the
+    user to re-connect the account (e.g. ``unauthorized_client`` — the stored
+    refresh token belongs to a different OAuth client than the current
+    ``GOOGLE_CLIENT_ID``). It never retries endlessly and never pretends success.
     """
     import httpx
 
@@ -464,12 +496,27 @@ async def refresh_google_token(refresh_token: str) -> Dict:
             },
         )
         if response.status_code != 200:
+            error_code = ""
+            error_description = ""
+            try:
+                err_body = response.json()
+                error_code = (err_body.get("error") or "").lower()
+                error_description = err_body.get("error_description") or ""
+            except Exception:
+                pass
+
+            if error_code in PERMANENT_GOOGLE_REFRESH_CODES:
+                raise GoogleOAuthRefreshError(error_code, error_description or error_code)
             raise ValueError(f"Google token refresh failed: {response.text}")
+
         tokens = response.json()
 
+    expires_in = int(tokens.get("expires_in", 3600))
     return {
         "access_token": tokens.get("access_token", ""),
-        "expires_in": tokens.get("expires_in", 3600),
+        "expires_in": expires_in,
+        "expires_at": time.time() + expires_in,
+        "client_id": GOOGLE_CLIENT_ID,
     }
 
 
@@ -499,6 +546,37 @@ async def refresh_hubspot_token(refresh_token: str) -> Dict:
 
 
 # ─── Helper: Build Google Credentials Object ─────────────────────────────────
+
+def google_access_token_valid(creds: Dict, safety_margin_seconds: int = 60) -> bool:
+    """
+    Decides whether the stored Google access token can still be used.
+
+    Returns False when there is no access token, when the token has an expiry
+    timestamp that is already past (minus a small safety margin), or when the
+    stored ``client_id`` does not match the current ``GOOGLE_CLIENT_ID``.
+
+    If expiry metadata is missing entirely (legacy credentials), the token is
+    treated as *possibly valid* — callers should attempt to use it and only
+    refresh when the API rejects it with 401. This avoids refreshing on every
+    call for credentials that never recorded an expiry.
+    """
+    if not creds or not creds.get("access_token"):
+        return False
+
+    stored_client_id = creds.get("client_id")
+    if stored_client_id and GOOGLE_CLIENT_ID and stored_client_id != GOOGLE_CLIENT_ID:
+        # The stored refresh/access token was minted by a different OAuth client.
+        return False
+
+    expires_at = creds.get("expires_at")
+    if expires_at is None:
+        # No expiry metadata: assume valid, refresh only if the API rejects it.
+        return bool(creds.get("access_token"))
+    try:
+        return time.time() + safety_margin_seconds < float(expires_at)
+    except (TypeError, ValueError):
+        return True
+
 
 def build_google_credentials(access_token: str, refresh_token: str):
     """

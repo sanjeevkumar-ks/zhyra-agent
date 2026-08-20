@@ -225,6 +225,92 @@ class ProviderManager:
         raise last_error or Exception("AI Generation failed after max retries")
 
     @classmethod
+    async def generate_structured(
+        cls,
+        workspace_id: str,
+        prompt: str,
+        system_prompt: str = None,
+        agent_override: Dict[str, Any] = None,
+        functions: List[Dict[str, Any]] = None,
+    ):
+        """Routes structured generation (with native tool calls) to the active provider.
+
+        Returns a ``StructuredLLMResponse``. Providers without native structured
+        tool calling fall back to their own text parser.
+        """
+        provider, settings = await cls.get_active_provider(workspace_id)
+
+        model = settings["model"]
+        temperature = settings["temperature"]
+        max_tokens = settings["max_tokens"]
+
+        if agent_override:
+            if agent_override.get("provider"):
+                override_provider = agent_override["provider"]
+                settings_ref = firestore_client.collection("settings").document(f"ai_providers_{workspace_id}")
+                settings_snap = settings_ref.get()
+                settings_data = settings_snap.to_dict() if settings_snap.exists else {}
+                if override_provider == "nvidia":
+                    raw_models = settings_data.get(override_provider, {}).get("models", {})
+                    models_config = {}
+                    for m_name, m_cfg in raw_models.items():
+                        models_config[m_name] = {
+                            "api_key": decrypt_value(m_cfg.get("api_key", "")),
+                            "base_url": m_cfg.get("base_url", "https://integrate.api.nvidia.com/v1")
+                        }
+                    dec_key = models_config
+                elif override_provider == "openrouter":
+                    enc_key = settings_data.get(override_provider, {}).get("api_key", "")
+                    dec_key = {
+                        "api_key": decrypt_value(enc_key),
+                        "custom_models": settings_data.get(override_provider, {}).get("custom_models", [])
+                    }
+                else:
+                    enc_key = settings_data.get(override_provider, {}).get("api_key", "")
+                    dec_key = decrypt_value(enc_key) or cls._get_env_key_fallback(override_provider)
+
+                provider = cls.get_provider_instance(
+                    provider_name=override_provider,
+                    api_key=dec_key,
+                    org_id=settings_data.get(override_provider, {}).get("organization_id"),
+                    base_url=settings_data.get(override_provider, {}).get("base_url")
+                )
+                model = agent_override.get("model") or provider.available_models[0]
+            else:
+                model = agent_override.get("model") or model
+
+            temperature = agent_override.get("temperature", temperature)
+            system_prompt = agent_override.get("system_prompt", system_prompt)
+
+        start_time = time.time()
+        retries = 2
+        last_error = None
+
+        for attempt in range(retries):
+            try:
+                result = await provider.generate_structured(
+                    prompt=prompt,
+                    system_prompt=system_prompt,
+                    model=model,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    functions=functions,
+                )
+                duration = time.time() - start_time
+                if hasattr(result, "latency_ms"):
+                    result.latency_ms = result.latency_ms or int(duration * 1000)
+                est_tokens = (len(prompt) + len(getattr(result, "text", ""))) // 4
+                log_ai_call(provider.name, model, duration, tokens=est_tokens)
+                return result
+            except Exception as e:
+                last_error = e
+                log_error(f"Structured AI generation attempt {attempt + 1} failed for {provider.name}", exc=e)
+
+        duration = time.time() - start_time
+        log_ai_call(provider.name, model, duration, errors=str(last_error))
+        raise last_error or Exception("Structured AI Generation failed after max retries")
+
+    @classmethod
     async def stream_response(
         cls,
         workspace_id: str,

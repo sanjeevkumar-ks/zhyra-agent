@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import AsyncGenerator, List, Dict, Any
+from typing import AsyncGenerator, List, Dict, Any, Optional
 
 class LLMProvider(ABC):
     @property
@@ -30,6 +30,15 @@ class LLMProvider(ABC):
         pass
 
     @property
+    def supports_structured_tool_calls(self) -> bool:
+        """Whether the provider natively returns structured tool calls.
+
+        Defaults to ``supports_functions``. Override where the provider returns
+        tool calls as structured objects rather than text.
+        """
+        return self.supports_functions
+
+    @property
     @abstractmethod
     def supports_embeddings(self) -> bool:
         pass
@@ -56,6 +65,48 @@ class LLMProvider(ABC):
     ) -> str:
         """Sends a standard text generation request."""
         pass
+
+    async def generate_structured(
+        self,
+        prompt: str,
+        system_prompt: str = None,
+        model: str = None,
+        temperature: float = 0.7,
+        max_tokens: int = 1000,
+        functions: List[Dict[str, Any]] = None,
+        tool_call_id_prefix: str = "call_",
+    ) -> Any:
+        """Generates a structured response with native tool calls.
+
+        Returns a ``StructuredLLMResponse`` with free text and/or ``ToolCall``
+        objects. Providers that do not implement native structured calling fall
+        back to :meth:`generate_text` plus the text ``TOOL_CALL`` compat parser.
+        """
+        from app.ai.tools.models import StructuredLLMResponse, ToolCall
+        from app.services.conversation_service import ConversationService
+
+        text = await self.generate_text(
+            prompt=prompt,
+            system_prompt=system_prompt,
+            model=model,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            functions=functions,
+        )
+        parsed = ConversationService._parse_tool_call(text or "")
+        if parsed:
+            return StructuredLLMResponse(
+                text="",
+                tool_calls=[ToolCall(
+                    id=f"{tool_call_id_prefix}tc",
+                    name=parsed.get("tool") or "",
+                    action=parsed.get("method") or "execute",
+                    args=parsed.get("args") or {},
+                    raw_name=parsed.get("tool") or "",
+                )],
+                model=model or "",
+            )
+        return StructuredLLMResponse(text=text or "", model=model or "")
 
     @abstractmethod
     async def stream_text(

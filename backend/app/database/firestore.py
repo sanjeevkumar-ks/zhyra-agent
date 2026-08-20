@@ -36,7 +36,10 @@ class MockCollectionReference:
         self.name = collection_name
         self.client = client
 
-    def document(self, doc_id: str) -> MockDocumentReference:
+    def document(self, doc_id: str = None) -> MockDocumentReference:
+        if doc_id is None:
+            import uuid
+            doc_id = f"{self.name[:3]}_{uuid.uuid4().hex[:8]}"
         return MockDocumentReference(self.name, doc_id, self.client)
 
     def stream(self) -> List[MockDocumentSnapshot]:

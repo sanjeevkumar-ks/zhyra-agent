@@ -111,6 +111,10 @@ class GoogleCalendarProvider(BaseIntegrationProvider):
             from app.integrations.oauth_helpers import refresh_google_token
             new_tokens = await refresh_google_token(creds["refresh_token"])
             creds["access_token"] = new_tokens["access_token"]
+            if new_tokens.get("expires_at"):
+                creds["expires_at"] = new_tokens["expires_at"]
+            if new_tokens.get("client_id"):
+                creds["client_id"] = new_tokens["client_id"]
             save_credentials(workspace_id, self.INTEGRATION_ID, creds)
             
             doc_ref = firestore_client.collection("integrations").document(f"{workspace_id}_{self.INTEGRATION_ID}")
@@ -140,16 +144,49 @@ class GoogleCalendarProvider(BaseIntegrationProvider):
                 "action": "Please connect Google Calendar in your workspace settings."
             }
 
-        # Auto refresh token if refresh_token is present
-        if creds.get("refresh_token"):
+        # Refresh ONLY when the stored access token is missing, expired, or was
+        # minted by a different OAuth client. Do NOT refresh on every call.
+        from app.integrations.oauth_helpers import google_access_token_valid, refresh_google_token, GoogleOAuthRefreshError
+        if not google_access_token_valid(creds):
+            if not creds.get("refresh_token"):
+                return {
+                    "success": False,
+                    "integration": "google_calendar",
+                    "tool": method,
+                    "error_code": "REAUTH_REQUIRED",
+                    "message": "Google Calendar authorization has expired. Reconnect your account to continue.",
+                    "action": "Reconnect Google Calendar."
+                }
             try:
-                from app.integrations.oauth_helpers import refresh_google_token
                 new_tokens = await refresh_google_token(creds["refresh_token"])
                 if new_tokens and new_tokens.get("access_token"):
                     creds["access_token"] = new_tokens["access_token"]
+                    if new_tokens.get("expires_at"):
+                        creds["expires_at"] = new_tokens["expires_at"]
+                    if new_tokens.get("client_id"):
+                        creds["client_id"] = new_tokens["client_id"]
                     save_credentials(workspace_id, self.INTEGRATION_ID, creds)
+                    log_info(f"[calendar.token.refresh] access token refreshed for workspace {workspace_id}")
+            except GoogleOAuthRefreshError as oauth_err:
+                log_error(f"[calendar.execution.failed] workspace_id={workspace_id} action={method} error_code=REAUTH_REQUIRED code={oauth_err.code}")
+                return {
+                    "success": False,
+                    "integration": "google_calendar",
+                    "tool": method,
+                    "error_code": "REAUTH_REQUIRED",
+                    "message": f"Google Calendar authorization needs to be refreshed. The stored connection is no longer valid ({oauth_err.code}).",
+                    "action": "Reconnect Google Calendar."
+                }
             except Exception as ref_err:
-                log_error(f"Pre-execution token refresh attempt failed: {ref_err}")
+                log_error(f"[calendar.token.refresh] failed for workspace {workspace_id}: {ref_err}")
+                return {
+                    "success": False,
+                    "integration": "google_calendar",
+                    "tool": method,
+                    "error_code": "REAUTH_REQUIRED",
+                    "message": "Google Calendar authorization could not be refreshed. Reconnect your account.",
+                    "action": "Reconnect Google Calendar."
+                }
 
         # Resolve Workspace Timezone
         ws_tz = "Asia/Kolkata"
@@ -182,12 +219,45 @@ class GoogleCalendarProvider(BaseIntegrationProvider):
             err_code = "PROVIDER_ERROR"
             user_msg = f"Google Calendar error: {str(e)}"
             action_req = "Verify integration settings."
-            
-            if "disabled" in err_msg or "not enabled" in err_msg:
+
+            # 401 while using a token without expiry metadata: refresh once and retry.
+            if "401" in err_msg or "invalid credentials" in err_msg or "invalid_grant" in err_msg:
+                if creds.get("refresh_token"):
+                    try:
+                        new_tokens = await refresh_google_token(creds["refresh_token"])
+                        if new_tokens and new_tokens.get("access_token"):
+                            creds["access_token"] = new_tokens["access_token"]
+                            if new_tokens.get("expires_at"):
+                                creds["expires_at"] = new_tokens["expires_at"]
+                            save_credentials(workspace_id, self.INTEGRATION_ID, creds)
+                            service = self._get_calendar_service(creds)
+                            if "list" in method_lower or "get" in method_lower:
+                                return await self._list_events(service, args, ws_tz)
+                            elif "create" in method_lower or "add" in method_lower:
+                                return await self._create_event(service, args, ws_tz)
+                            elif "cancel" in method_lower or "delete" in method_lower:
+                                return await self._delete_event(service, args, ws_tz)
+                            elif "update" in method_lower or "edit" in method_lower:
+                                return await self._update_event(service, args, ws_tz)
+                    except GoogleOAuthRefreshError as oauth_err:
+                        return {
+                            "success": False,
+                            "integration": "google_calendar",
+                            "tool": method,
+                            "error_code": "REAUTH_REQUIRED",
+                            "message": f"Google Calendar authorization has expired ({oauth_err.code}). Reconnect your account.",
+                            "action": "Reconnect Google Calendar."
+                        }
+                    except Exception:
+                        pass
+                err_code = "REAUTH_REQUIRED"
+                user_msg = "Google Calendar authorization has expired."
+                action_req = "Reconnect Google Calendar."
+            elif "disabled" in err_msg or "not enabled" in err_msg:
                 err_code = "API_DISABLED"
                 user_msg = "Google Calendar API is not enabled in the Google Cloud Console."
                 action_req = "Enable Google Calendar API in Google Cloud Console."
-            elif "invalid credentials" in err_msg or "auth" in err_msg or "401" in err_msg:
+            elif "auth" in err_msg:
                 err_code = "REAUTH_REQUIRED"
                 user_msg = "Google Calendar authorization has expired."
                 action_req = "Reconnect Google Calendar."

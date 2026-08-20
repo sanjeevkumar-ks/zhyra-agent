@@ -21,18 +21,21 @@ class IntegrationPreflight:
         cls,
         workspace_id: str,
         agent_id: str,
-        integration_id: str
+        integration_id: str,
+        lightweight: bool = True
     ) -> PreflightResult:
         """
         Non-blocking preflight validation check.
         Uses centralized IntegrationResolver to verify agent tool assignment,
         workspace connection, and token validity without blocking LLM retrieval.
+        Lightweight by default: no network validation or token refresh.
         """
         try:
             status_code, message, details = await IntegrationResolver.resolve_integration_connection(
                 workspace_id=workspace_id,
                 agent_id=agent_id,
-                provider_or_tool=integration_id
+                provider_or_tool=integration_id,
+                lightweight=lightweight
             )
 
             if status_code == "CONNECTED":

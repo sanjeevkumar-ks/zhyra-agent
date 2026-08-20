@@ -142,7 +142,9 @@ export const apiClient = {
   async stream(
     path: string,
     onChunk: (text: string) => void,
-    onMetadata?: (meta: any) => void
+    onMetadata?: (meta: any) => void,
+    onEvent?: (event: any) => void,
+    onAck?: (ack: any) => void
   ): Promise<void> {
     const currentUser = auth.currentUser;
     let authHeader = "";
@@ -179,7 +181,19 @@ export const apiClient = {
           if (content === "[DONE]") {
             return;
           }
-          if (content.startsWith("__METADATA__:")) {
+          if (content.startsWith("__ACK__:")) {
+            if (onAck) {
+              try {
+                onAck(JSON.parse(content.substring(8)));
+              } catch {}
+            }
+          } else if (content.startsWith("__EVENT__:")) {
+            if (onEvent) {
+              try {
+                onEvent(JSON.parse(content.substring(10)));
+              } catch {}
+            }
+          } else if (content.startsWith("__METADATA__:")) {
             if (onMetadata) {
               try {
                 const meta = JSON.parse(content.substring(13));

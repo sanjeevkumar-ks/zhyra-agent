@@ -7,6 +7,7 @@ from app.providers.manager import ProviderManager
 from app.database.firestore import firestore_client
 from app.utils.logger import log_info, log_error
 
+
 class AgentState(TypedDict):
     workspace_id: str
     agent_id: str
@@ -24,33 +25,43 @@ class AgentState(TypedDict):
     ai_text: str
     tool_call: Optional[Dict[str, Any]]
     tool_result: Optional[Dict[str, Any]]
+    tool_calls: List[Dict[str, Any]]
+    tool_records: List[Dict[str, Any]]
     status: str
     intent: str
     confidence: int
     context_packet: Optional[Dict[str, Any]]
+    trace_id: str
+    mode: str
+    timings: Dict[str, Any]
     # Workflow Execution State
     workflow_id: Optional[str]
     workflow_nodes: List[Dict[str, Any]]
     workflow_edges: List[Dict[str, Any]]
     current_node_id: Optional[str]
 
+
 # -------------------------------------------------------------
 # Nodes for Standard Execution Graph
 # -------------------------------------------------------------
 
 async def retrieve_context_node(state: AgentState) -> Dict[str, Any]:
-    """Retrieves document context from knowledge base using optimized Context Engine and Dynamic Tool Registry."""
+    """Retrieves document context using lightweight Context Engine + Dynamic Tool Registry."""
+    import time
     from app.ai.context.engine import ContextEngine
     from app.ai.integration.dynamic_registry import DynamicToolRegistry
-    
-    # Compile dynamic tool instructions only for connected, permitted, and ready tools
+
+    t_start = time.time()
+
+    # Compile dynamic tool instructions only for connected, permitted tools.
+    # Lightweight: no network validation of tokens at request time.
     agent_tools = state["agent_data"].get("tools") or []
-    tools_instructions, ready_tools = await DynamicToolRegistry.get_available_tools_prompt(
+    tools_instructions, ready_ids = await DynamicToolRegistry.get_available_tools_prompt(
         workspace_id=state["workspace_id"],
         agent_id=state["agent_id"],
         agent_tools=agent_tools
     )
-    
+
     packet = await ContextEngine.build(
         workspace_id=state["workspace_id"],
         agent_id=state["agent_id"],
@@ -58,32 +69,37 @@ async def retrieve_context_node(state: AgentState) -> Dict[str, Any]:
         query=state["user_query"],
         history=state["history"]
     )
-    
+
     # Prepend dynamic tool prompt
     if tools_instructions:
         packet.tool_prompt = tools_instructions + (packet.tool_prompt or "")
 
     packet_dict = packet.model_dump()
-    packet_dict["ready_tools"] = ready_tools
+    packet_dict["ready_tools"] = ready_ids
+
+    timings = dict(state.get("timings") or {})
+    timings["tools_loading_ms"] = int((time.time() - t_start) * 1000)
 
     return {
         "context": packet.rag_context,
         "cited_sources": packet.cited_sources,
-        "context_packet": packet_dict
+        "context_packet": packet_dict,
+        "timings": timings,
     }
 
+
 async def generate_response_node(state: AgentState) -> Dict[str, Any]:
-    """Generates next response turn using ProviderManager and tracks token usage."""
+    """Generates the next turn using structured tool calling (native functionCall)."""
     packet_data = state.get("context_packet")
-    ready_tools = []
+    ready_ids = []
     if packet_data:
         from app.ai.context.models import ContextPacket
         packet = ContextPacket(**packet_data)
         system_prompt = packet.system_prompt
         if packet.tool_prompt:
             system_prompt += packet.tool_prompt
-        ready_tools = packet_data.get("ready_tools", [])
-        
+        ready_ids = packet_data.get("ready_tools", [])
+
         prompt = f"Conversational History:\n{packet.conversation_history}\n"
         if packet.memory_context:
             prompt += f"{packet.memory_context}\n\n"
@@ -93,9 +109,9 @@ async def generate_response_node(state: AgentState) -> Dict[str, Any]:
         history_summary = MemoryService.get_short_term_context(state["history"])
         tools_instructions = ""
         agent_tools = state["agent_data"].get("tools") or []
-        from app.services.conversation_service import ConversationService
-        tools_instructions = await ConversationService._get_agent_tools_prompt(
-            state["workspace_id"], agent_tools
+        from app.ai.integration.dynamic_registry import DynamicToolRegistry
+        tools_instructions, ready_ids = await DynamicToolRegistry.get_available_tools_prompt(
+            state["workspace_id"], state["agent_id"], agent_tools
         )
         overrides = state["agent_data"].get("overrides") or {}
         system_prompt = overrides.get("system_prompt", "") or f"You are {state['agent_data'].get('name')}. Purpose: {state['agent_data'].get('purpose')}."
@@ -109,21 +125,32 @@ async def generate_response_node(state: AgentState) -> Dict[str, Any]:
     system_prompt += f"\n\n[CURRENT DATETIME CONTEXT]\nCurrent Date & Time: {dt_str}\nTimezone: Asia/Kolkata\n"
 
     system_prompt += (
-        "\n[TOOL EXECUTION RULES]\n"
-        "- Never claim an action (like scheduling a meeting or sending an email) was completed unless a TOOL_RESULT with success: true and a valid resource ID is returned.\n"
-        "- When issuing a TOOL_CALL, output ONLY the TOOL_CALL block without asserting that the action has already succeeded.\n"
-        "- If TOOL_RESULT indicates failure or if an integration is not connected, state clearly that the action could not be completed.\n\n"
+        "\n[VERIFICATION RULES]\n"
+        "- Never claim an action (scheduling a meeting, sending an email, etc.) was completed unless the system returns a verified TOOL_RESULT with a real resource ID.\n"
+        "- If you need to schedule, send, search, or modify a connected integration, emit a function call. Do not describe the action as already done.\n"
+        "- If the requested action has no available tool or the integration is not connected, state clearly that the action could not be completed.\n\n"
         "Formatting Guidelines:\n"
         "- Never reply with a single dense paragraph.\n"
         "- Break your response into short, readable paragraphs (maximum 2-3 sentences each).\n"
-        "- Use bullet points or numbered lists where appropriate to list details, steps, or features.\n"
+        "- Use bullet points or numbered lists where appropriate.\n"
         "- Use bold styling (**text**) to highlight key names, metrics, status values, dates, or prices.\n"
         "- Keep your response clear, organized, and scannable."
     )
 
-    if state.get("tool_result"):
+    # Simulation mode is explicit: the model is told tool results are simulated
+    # so it never phrases them as real external actions.
+    if (state.get("mode") or "live") == "simulation":
+        system_prompt += (
+            "\n\n[MODE: SIMULATION]\n"
+            "You are running in SIMULATION mode. Tool calls are resolved and "
+            "validated against the real connection, but NO external API is called "
+            "and NO real external action occurs. When a tool result comes back, "
+            "clearly state it was simulated and do not claim a real action happened."
+        )
+
+    if state.get("tool_records"):
         import json
-        prompt += f"TOOL_RESULT: {json.dumps(state['tool_result'])}\n"
+        prompt += f"TOOL_RESULT: {json.dumps(state['tool_records'])}\n"
     prompt += f"Customer: {state['user_query']}\nResponse:"
 
     agent_override = dict(state["agent_data"].get("overrides") or {})
@@ -134,9 +161,9 @@ async def generate_response_node(state: AgentState) -> Dict[str, Any]:
     start_time = time.time()
 
     from app.ai.integration.dynamic_registry import DynamicToolRegistry
-    functions_schema = DynamicToolRegistry.get_tool_schemas(ready_tools) if ready_tools else None
+    functions_schema = DynamicToolRegistry.get_tool_schemas(ready_ids) if ready_ids else None
 
-    ai_text = await ProviderManager.generate_response(
+    structured = await ProviderManager.generate_structured(
         workspace_id=state["workspace_id"],
         prompt=prompt,
         system_prompt=system_prompt,
@@ -146,30 +173,28 @@ async def generate_response_node(state: AgentState) -> Dict[str, Any]:
 
     duration_ms = int((time.time() - start_time) * 1000)
 
-    # Track / log token usage statistics to Firestore
-    from app.ai.context.budget import ContextBudgetManager
-    _, provider_settings = await ProviderManager.get_active_provider(state["workspace_id"])
-    overrides = state["agent_data"].get("overrides") or {}
-    model_name = overrides.get("model") or provider_settings.get("model", "gemini-3.5-flash")
-    provider_name = provider_settings.get("provider", "gemini")
+    tool_calls = []
+    for tc in (getattr(structured, "tool_calls", None) or []):
+        tool_calls.append(tc.model_dump() if hasattr(tc, "model_dump") else dict(tc))
 
-    safe_ai_text = ai_text or ""
-    from app.services.conversation_service import ConversationService
-    tool_call = ConversationService._parse_tool_call(safe_ai_text)
-
+    # Track token usage statistics to Firestore
     try:
-        from app.database.firestore import firestore_client
+        from app.ai.context.budget import ContextBudgetManager
+        _, provider_settings = await ProviderManager.get_active_provider(state["workspace_id"])
+        overrides = state["agent_data"].get("overrides") or {}
+        model_name = overrides.get("model") or provider_settings.get("model", "gemini-3.5-flash")
+        provider_name = provider_settings.get("provider", "gemini")
+
         usage_ref = firestore_client.collection("token_usage").document()
-        
         sys_tokens = ContextBudgetManager.estimate_tokens(system_prompt)
         prompt_tokens = ContextBudgetManager.estimate_tokens(prompt)
-        output_tokens = ContextBudgetManager.estimate_tokens(safe_ai_text)
-        
+        output_tokens = ContextBudgetManager.estimate_tokens(structured.text)
+
         convo_tokens = ContextBudgetManager.estimate_tokens(packet_data.get("conversation_history", "")) if packet_data else prompt_tokens
         mem_tokens = ContextBudgetManager.estimate_tokens(packet_data.get("memory_context", "")) if packet_data else 0
         rag_tokens = ContextBudgetManager.estimate_tokens(packet_data.get("rag_context", "")) if packet_data else 0
         tool_def_tokens = ContextBudgetManager.estimate_tokens(packet_data.get("tool_prompt", "")) if packet_data else 0
-        tool_res_tokens = ContextBudgetManager.estimate_tokens(json.dumps(state.get("tool_result", {}))) if state.get("tool_result") else 0
+        tool_res_tokens = ContextBudgetManager.estimate_tokens(json.dumps(state.get("tool_records", {}))) if state.get("tool_records") else 0
 
         usage_data = {
             "id": usage_ref.id,
@@ -194,171 +219,155 @@ async def generate_response_node(state: AgentState) -> Dict[str, Any]:
     except Exception as e:
         log_error("Failed to record token usage to Firestore", exc=e)
 
+    timings = dict(state.get("timings") or {})
+    timings["llm_ms"] = duration_ms
+
     return {
-        "ai_text": ai_text,
-        "tool_call": tool_call,
+        "ai_text": structured.text,
+        "tool_calls": tool_calls,
         "loop_count": state["loop_count"] + 1,
         "prompt": prompt,
-        "system_prompt": system_prompt
+        "system_prompt": system_prompt,
+        "timings": timings,
     }
+
 
 async def execute_tool_node(state: AgentState) -> Dict[str, Any]:
-    """Executes a tool call after running preflight validation checks, returning a normalized outcome."""
-    tool_call = state["tool_call"]
-    if not tool_call:
+    """Executes structured tool calls via the verified ToolExecutor."""
+    from app.services.tool_executor import ToolExecutor
+    from app.ai.tools.models import ToolCall
+    import time
+
+    t_start = time.time()
+    tool_calls = state.get("tool_calls") or []
+    if not tool_calls:
         return {}
-        
-    tool_name = tool_call.get("tool", "")
-    method_name = tool_call.get("method", "")
-    args = tool_call.get("args", {})
-    
-    # Handle function_name patterns like calendar_create_event or GoogleCalendar.create_event
-    if "." in tool_name:
-        parts = tool_name.split(".", 1)
-        tool_name = parts[0]
-        method_name = parts[1]
-    elif "_" in tool_name and not method_name:
-        if tool_name.startswith("calendar_"):
-            method_name = tool_name.replace("calendar_", "")
-            tool_name = "GoogleCalendar"
-        elif tool_name.startswith("gmail_"):
-            method_name = tool_name.replace("gmail_", "")
-            tool_name = "Gmail"
-        elif tool_name.startswith("gdrive_"):
-            method_name = tool_name.replace("gdrive_", "")
-            tool_name = "GoogleDrive"
-        elif tool_name.startswith("slack_"):
-            method_name = tool_name.replace("slack_", "")
-            tool_name = "Slack"
-        elif tool_name.startswith("hubspot_"):
-            method_name = tool_name.replace("hubspot_", "")
-            tool_name = "HubSpot"
-        elif tool_name.startswith("shopify_"):
-            method_name = tool_name.replace("shopify_", "")
-            tool_name = "Shopify"
 
-    log_info(f"[Tool Execution Started] workspace_id={state['workspace_id']} agent_id={state['agent_id']} selected_tool_name={tool_name} method_name={method_name} tool_arguments={args}")
-
-    # 1. Map tool name to integration ID
-    integration_id = tool_name
-    tool_name_lower = tool_name.lower()
-    tool_to_id = {
-        "googlecalendar": "int_gcal", "calendar": "int_gcal", "gcal": "int_gcal", "event": "int_gcal",
-        "gmail": "int_gmail", "email": "int_gmail",
-        "whatsapp": "int_whatsapp",
-        "googledrive": "int_gdrive", "drive": "int_gdrive", "file": "int_gdrive",
-        "hubspot": "int_hubspot", "crm": "int_hubspot",
-        "razorpay": "int_razorpay",
-        "shopify": "int_shopify", "store": "int_shopify",
-        "googlemeet": "int_gmeet", "meet": "int_gmeet",
-        "slack": "int_slack",
-        "googlemaps": "int_google_maps", "maps": "int_google_maps",
-        "elevenlabs": "int_elevenlabs",
-        "firebase": "int_fcm", "fcm": "int_fcm",
-        "customapi": "int_rest_api", "restapi": "int_rest_api"
-    }
-    for key, val in tool_to_id.items():
-        if key in tool_name_lower or key in method_name.lower():
-            integration_id = val
-            break
-
-    # 2. Run Preflight Check
-    from app.ai.integration.preflight import IntegrationPreflight
-    from app.ai.integration.normalizer import ToolResultNormalizer
-
-    preflight = await IntegrationPreflight.check(state["workspace_id"], state["agent_id"], integration_id)
-    
-    if preflight.status != "READY":
-        log_info(f"[Tool Execution Preflight Blocked] integration_name={integration_id} integration_status={preflight.status} message={preflight.message}")
-        normalized_result = ToolResultNormalizer.normalize_error(
-            tool_name, method_name, preflight.status, preflight.message
+    records = []
+    results = []
+    trace_id = state.get("trace_id") or ""
+    mode = state.get("mode") or "live"
+    for tc_dict in tool_calls:
+        tc = ToolCall(**tc_dict) if isinstance(tc_dict, dict) else tc_dict
+        # Make tool-call IDs unique per request (LLM may emit generic ids like "call_0")
+        if not tc.id or tc.id.startswith("call_") or tc.id.startswith("tc"):
+            tc.id = f"{trace_id or 'req'}_{tc.id or 'tc'}"
+        log_info(
+            f"[Tool Execution Started] trace_id={trace_id} mode={mode} "
+            f"selected_tool_name={tc.name} tool_arguments={tc.args}"
         )
-    else:
-        # 3. Execute Tool via Registry
-        try:
-            result = await ToolRegistry.execute_tool(state["workspace_id"], tool_name, method_name, args)
-            log_info(f"[Tool Execution Completed] integration_name={integration_id} integration_status=READY selected_tool_name={tool_name} method_name={method_name}")
-            
-            # If the provider returned a dictionary error/result directly
-            if isinstance(result, dict):
-                normalized_result = result
-            else:
-                normalized_result = ToolResultNormalizer.normalize_response(tool_name, method_name, result)
-        except Exception as e:
-            log_error(f"[Tool Execution Failed] selected_tool_name={tool_name} method_name={method_name}", exc=e)
-            normalized_result = ToolResultNormalizer.normalize_error(
-                tool_name, method_name, "PROVIDER_ERROR", str(e)
-            )
+        record = await ToolExecutor.execute_tool_call(
+            workspace_id=state["workspace_id"],
+            agent_id=state["agent_id"],
+            tool_call=tc,
+            conversation_id=state["conversation_id"],
+            user_id=state["user_id"],
+            mode=mode,
+        )
+        records.append(record.to_dict())
+        results.append(record.to_user_payload())
+        log_info(
+            f"[Tool Execution Completed] trace_id={trace_id} "
+            f"selected_tool_name={tc.name} status={record.status} simulated={record.simulated} "
+            f"error_code={record.error_code} external_resource_id={record.external_resource_id} duration_ms={record.duration_ms}"
+        )
+
+        # Record issue to Firestore if a real (non-simulated) tool execution failed
+        if record.status == "FAILED" and not record.simulated:
+            try:
+                issue_ref = firestore_client.collection("issues").document()
+                issue_ref.set({
+                    "id": issue_ref.id,
+                    "workspace_id": state["workspace_id"],
+                    "agent_id": state["agent_id"],
+                    "agent_name": state["agent_data"].get("name", "Agent"),
+                    "title": f"{tc.name} Action Failed: {record.error_code or 'ERROR'}",
+                    "severity": "high" if record.error_code in ["REAUTH_REQUIRED", "TOKEN_EXPIRED", "TOKEN_REFRESH_FAILED"] else "medium",
+                    "status": "open",
+                    "integration": record.integration_id,
+                    "occurrences": 1,
+                    "first_detected": time.time(),
+                    "last_detected": time.time(),
+                    "error_details": record.message,
+                    "timestamp": time.time()
+                })
+            except Exception as err:
+                log_error("Failed to log issue to Firestore", exc=err)
+
+    # Build deterministic final message from verified results.
+    # No second LLM call: verified results are authoritative and faster.
+    ai_text = _build_result_message(results)
 
     actions = list(state.get("actions", []))
-    actions.append(f"{tool_name}: {method_name} called")
+    for rec in records:
+        actions.append(f"{rec.get('tool')}: {rec.get('action')} -> {rec.get('status')}")
 
-    # Record issue to Firestore if tool execution failed
-    if normalized_result.get("success") is False:
-        try:
-            import time
-            issue_ref = firestore_client.collection("issues").document()
-            issue_ref.set({
-                "id": issue_ref.id,
-                "workspace_id": state["workspace_id"],
-                "agent_id": state["agent_id"],
-                "agent_name": state["agent_data"].get("name", "Agent"),
-                "title": f"{tool_name} Action Failed: {normalized_result.get('error_code', 'ERROR')}",
-                "severity": "high" if normalized_result.get("error_code") in ["REAUTH_REQUIRED", "TOKEN_EXPIRED"] else "medium",
-                "status": "open",
-                "integration": integration_id,
-                "occurrences": 1,
-                "first_detected": time.time(),
-                "last_detected": time.time(),
-                "error_details": normalized_result.get("message") or "Tool execution failed.",
-                "timestamp": time.time()
-            })
-        except Exception as err:
-            log_error("Failed to log issue to Firestore", exc=err)
+    timings = dict(state.get("timings") or {})
+    timings["tool_execution_ms"] = int((time.time() - t_start) * 1000)
 
     return {
-        "tool_result": normalized_result,
+        "ai_text": ai_text,
+        "tool_result": results[0] if results else None,
+        "tool_records": records,
+        "tool_calls": [],
         "actions": actions,
-        "tool_call": None
+        "timings": timings,
     }
 
-def should_execute_tool(state: AgentState) -> str:
-    """Decides if we should run a tool or finalize generation."""
-    if state.get("tool_call") and state["loop_count"] < 3:
-        return "execute_tool"
-    return "finalize"
+
+def _build_result_message(results: List[Dict[str, Any]]) -> str:
+    """Deterministic user-facing message from verified tool execution records."""
+    if not results:
+        return ""
+    parts = []
+    for res in results:
+        status = res.get("status")
+        simulated = bool(res.get("simulated"))
+        if simulated:
+            action = res.get("action") or "action"
+            parts.append(
+                f"[Simulation] The {action} was resolved but NOT executed — "
+                "no real external action occurred."
+            )
+            continue
+        if status == "SUCCEEDED":
+            tool = res.get("tool") or ""
+            if "create_event" in (res.get("action") or "") or "calendar" in str(tool).lower():
+                title = (res.get("data") or {}).get("title") or "your meeting"
+                start = (res.get("data") or {}).get("start_time") or ""
+                parts.append(
+                    f"Done — I've scheduled **{title}**"
+                    + (f" for {start}." if start else ".")
+                )
+            elif "send_email" in (res.get("action") or "") or "gmail" in str(tool).lower():
+                parts.append("Done — I've sent the email.")
+            elif "send_message" in (res.get("action") or "") or "slack" in str(tool).lower():
+                parts.append("Done — I've posted the message to Slack.")
+            else:
+                parts.append("Action completed successfully.")
+        else:
+            message = res.get("message") or "The action could not be completed."
+            parts.append(f"I couldn't complete the action because: {message}")
+    return "\n".join(parts)
+
 
 async def finalize_node(state: AgentState) -> Dict[str, Any]:
-    """Cleans up raw tool block text and classifies final response intent."""
+    """Verification gate + sanitization + intent classification."""
     from app.services.conversation_service import ConversationService
     ai_text = ConversationService.sanitize_tool_call_text(state.get("ai_text", ""))
 
-    # Handle tool_result state verification
-    if state.get("tool_result"):
-        res = state["tool_result"]
-        is_success = res.get("success", False)
-        if is_success:
-            tool_name = str(res.get("tool", "")).lower()
-            if not ai_text:
-                if "calendar" in tool_name or "gcal" in tool_name or "event" in tool_name:
-                    ai_text = "Done — I've scheduled your meeting."
-                elif "email" in tool_name or "gmail" in tool_name:
-                    ai_text = "Done — I've sent the email."
-                elif "slack" in tool_name:
-                    ai_text = "Done — I've sent the message to Slack."
-                else:
-                    ai_text = "Action completed successfully."
-        else:
-            err_msg = res.get("message") or "Tool execution failed."
-            success_kws = ["created", "scheduled", "added", "booked", "done — i've", "i've scheduled", "i've created"]
-            if not ai_text or any(kw in ai_text.lower() for kw in success_kws):
-                ai_text = f"I couldn't complete the action because: {err_msg}"
+    # Verification gate: never pass through a success claim without a verified result.
+    ai_text = ConversationService._enforce_verification_gate(
+        ai_text,
+        tool_records=state.get("tool_records") or [],
+        tool_result=state.get("tool_result"),
+    )
 
     # Query lower for classification
     query_lower = state["user_query"].lower()
     intent = "Inquire details"
     status = state.get("status", "active")
-    
+
     if "appointment" in query_lower or "schedule" in query_lower or "book" in query_lower or "meet" in query_lower:
         intent = "Book Appointment / Schedule Meeting"
     elif "refund" in query_lower or "cancel" in query_lower or "charge" in query_lower:
@@ -372,6 +381,14 @@ async def finalize_node(state: AgentState) -> Dict[str, Any]:
 
     return {"ai_text": ai_text, "intent": intent, "status": status}
 
+
+def should_execute_tool(state: AgentState) -> str:
+    """Decides if we should run a tool or finalize generation."""
+    if (state.get("tool_calls") or []) and state["loop_count"] < 3:
+        return "execute_tool"
+    return "finalize"
+
+
 # -------------------------------------------------------------
 # Nodes for Workflow-Driven Execution Graph
 # -------------------------------------------------------------
@@ -381,20 +398,20 @@ async def execute_workflow_node(state: AgentState) -> Dict[str, Any]:
     current_id = state["current_node_id"]
     nodes = state["workflow_nodes"]
     edges = state["workflow_edges"]
-    
+
     node = next((n for n in nodes if n["id"] == current_id), None)
     if not node:
         return {"current_node_id": None}
-        
+
     ntype = node.get("type")
     nlabel = node.get("label")
     ndesc = node.get("desc", "")
     actions = list(state.get("actions", []))
     actions.append(f"Workflow: {nlabel} ({ntype}) executed")
-    
+
     # Initialize updates dict
     updates = {"actions": actions}
-    
+
     # 1. Type specific logic
     if ntype == "knowledge":
         # Run retrieval and update context
@@ -404,10 +421,9 @@ async def execute_workflow_node(state: AgentState) -> Dict[str, Any]:
         updates["context"] = state.get("context", "") + "\n\n" + context_str
         updates["cited_sources"] = list(set(state.get("cited_sources", []) + cited))
     elif ntype in ["booking", "email", "crm", "calendar", "api", "payment"]:
-        # Run corresponding tool/API logic
+        # Run corresponding tool/API logic. Only registered tools may execute.
         tool_name = node.get("tool") or ntype
         fallback = node.get("fallback", "")
-        # Run a simple execution on the registered tool
         method = "execute"
         if ntype == "booking" or ntype == "calendar":
             method = "create_event" if "create" in ndesc.lower() else "list_events"
@@ -415,25 +431,30 @@ async def execute_workflow_node(state: AgentState) -> Dict[str, Any]:
             method = "send_email"
         elif ntype == "crm":
             method = "get_order" if "order" in ndesc.lower() else "list_products"
-            
-        result = await ToolRegistry.execute_tool(state["workspace_id"], tool_name, method, {})
-        if "Error" in result and fallback:
-            actions.append(f"Tool {tool_name} failed. Falling back to: {fallback}")
-        updates["tool_result"] = result
+
+        from app.ai.tools import tool_registry
+        resolved = tool_registry.resolve(tool_name, method)
+        if not resolved:
+            actions.append(f"Workflow tool {tool_name}.{method} is not registered — skipped (only registered tools may execute).")
+        else:
+            result = await ToolRegistry.execute_tool(state["workspace_id"], tool_name, method, {})
+            if isinstance(result, dict) and result.get("status") == "FAILED" and fallback:
+                actions.append(f"Tool {tool_name} failed. Falling back to: {fallback}")
+            updates["tool_result"] = result
     elif ntype == "escalation" or ntype == "human":
         updates["status"] = "escalated"
     elif ntype == "intent":
         updates["intent"] = nlabel
-        
+
     # Find next node based on edges
-    # Standard linear next node selection or custom condition logic
     next_edge = next((e for e in edges if e["source"] == current_id), None)
     if next_edge:
         updates["current_node_id"] = next_edge["target"]
     else:
         updates["current_node_id"] = None
-        
+
     return updates
+
 
 def should_continue_workflow(state: AgentState) -> str:
     """Decides whether to execute next workflow node or generate final response."""
@@ -441,28 +462,29 @@ def should_continue_workflow(state: AgentState) -> str:
         return "workflow_step"
     return "generate_response"
 
+
 # -------------------------------------------------------------
 # Graph Construction
 # -------------------------------------------------------------
 
 def build_agent_graph() -> StateGraph:
     workflow = StateGraph(AgentState)
-    
+
     # Define standard nodes
     workflow.add_node("retrieve_context", retrieve_context_node)
     workflow.add_node("generate_response", generate_response_node)
     workflow.add_node("execute_tool", execute_tool_node)
     workflow.add_node("finalize", finalize_node)
-    
+
     # Define workflow nodes
     workflow.add_node("workflow_step", execute_workflow_node)
-    
+
     # Setup routing helper based on workflow status
     def route_start(state: AgentState) -> str:
         if state.get("workflow_id") and state.get("current_node_id"):
             return "workflow_step"
         return "retrieve_context"
-        
+
     workflow.set_conditional_entry_point(
         route_start,
         {
@@ -470,10 +492,10 @@ def build_agent_graph() -> StateGraph:
             "retrieve_context": "retrieve_context"
         }
     )
-    
+
     # Standard Flow edges
     workflow.add_edge("retrieve_context", "generate_response")
-    
+
     workflow.add_conditional_edges(
         "generate_response",
         should_execute_tool,
@@ -482,10 +504,12 @@ def build_agent_graph() -> StateGraph:
             "finalize": "finalize"
         }
     )
-    
-    workflow.add_edge("execute_tool", "generate_response")
+
+    # execute_tool -> finalize directly. Verified results produce the final
+    # message deterministically (no second LLM round trip).
+    workflow.add_edge("execute_tool", "finalize")
     workflow.add_edge("finalize", END)
-    
+
     # Workflow execution edges
     workflow.add_conditional_edges(
         "workflow_step",
@@ -495,8 +519,9 @@ def build_agent_graph() -> StateGraph:
             "generate_response": "generate_response"
         }
     )
-    
+
     return workflow.compile()
+
 
 # Single compiled instance
 compiled_agent_graph = build_agent_graph()

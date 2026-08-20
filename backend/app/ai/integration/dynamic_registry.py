@@ -2,8 +2,12 @@ import datetime
 from typing import List, Dict, Any, Tuple
 from zoneinfo import ZoneInfo
 from app.database.firestore import firestore_client
-from app.ai.integration.preflight import IntegrationPreflight
+from app.ai.tools.tool_registry import (
+    get_schemas_for_integrations,
+    get_ready_tool_keys,
+)
 from app.utils.logger import log_info, log_error
+
 
 class DynamicToolRegistry:
     @classmethod
@@ -14,28 +18,19 @@ class DynamicToolRegistry:
         agent_tools: List[Any]
     ) -> Tuple[str, List[str]]:
         """
-        Dynamically compiles system instructions and API capability definitions
-        only for integration tools that are connected, permitted, and preflight READY.
-        Includes workspace current date, time, and timezone context for relative date resolution.
-        """
-        connected_ids = []
-        try:
-            coll = firestore_client.collection("integrations")
-            docs = coll.stream()
-            for doc in docs:
-                data = doc.to_dict() or {}
-                if data.get("workspace_id") == workspace_id and data.get("connected"):
-                    connected_ids.append(data.get("id"))
-        except Exception as e:
-            log_error("Failed to query integrations list for dynamic registry", exc=e)
+        Lightweight compilation of tool instructions and schemas for the agent.
 
-        ready_tools = []
-        for iid in connected_ids:
-            if not iid:
-                continue
-            preflight = await IntegrationPreflight.check(workspace_id, agent_id, iid)
-            if preflight.status == "READY":
-                ready_tools.append(iid)
+        This is a pure Firestore read path: it NEVER calls the integration
+        providers, never validates tokens against Google, and never attempts a
+        token refresh. Only integrations that are connected AND assigned to this
+        agent contribute tools. Actual token validation happens at execution.
+
+        Returns:
+            (prompt_instructions, ready_integration_ids)
+        """
+        connected_ids = cls._get_connected_ids(workspace_id)
+        assigned_ids = cls._get_assigned_ids(agent_id)
+        ready_ids = [iid for iid in connected_ids if iid in assigned_ids]
 
         # Get workspace timezone or fallback
         tz_str = "Asia/Kolkata"
@@ -63,148 +58,145 @@ class DynamicToolRegistry:
             f"(Use this current timestamp and timezone when resolving relative dates like 'today', 'tomorrow', 'next week', or specific meeting times).\n\n"
         )
 
-        if not ready_tools:
+        if not ready_ids:
             return prompt_instructions, []
 
         prompt_instructions += (
-            "[CRITICAL INTEGRATION INSTRUCTION]\n"
-            "You have access to the following connected integration tools. "
-            "If the customer query requires checking, creating, updating, or deleting calendar events, sending emails, or searching files, you MUST respond by outputting a TOOL_CALL block.\n"
-            "Do NOT politely decline or say you cannot access tools directly. You MUST perform the requested action using available tools.\n\n"
-            "Format:\n"
-            "TOOL_CALL:{\"tool\": \"<ToolName>\", \"method\": \"<MethodName>\", \"args\": {<arguments>}}\n"
+            "[TOOL USAGE RULES]\n"
+            "You have access to the connected integration tools listed below. "
+            "If the customer query requires checking, creating, updating, or deleting calendar events, sending emails, or searching files, "
+            "you MUST invoke the matching tool. Do not decline if the action is within the available tools.\n"
+            "Use the function-calling interface to emit tool calls. "
+            "Never claim an action was completed before the system returns a verified TOOL_RESULT.\n\n"
             "Available tools based on connected integrations:\n"
         )
 
-        tool_lines = []
-        for t in ready_tools:
+        for t in ready_ids:
             desc = cls._get_tool_description(t)
             if desc:
-                tool_lines.append(desc)
+                prompt_instructions += desc
 
-        joined_lines = "\n".join(tool_lines)
-        return prompt_instructions + joined_lines, ready_tools
+        return prompt_instructions, ready_ids
 
     @classmethod
-    def get_tool_schemas(cls, ready_tools: List[str]) -> List[Dict[str, Any]]:
-        """Returns JSON schema function declarations for LLM tool calling."""
-        schemas = []
-        if "int_gcal" in ready_tools:
-            schemas.extend([
-                {
-                    "name": "calendar_create_event",
-                    "description": "Schedules a new meeting or event on Google Calendar.",
-                    "parameters": {
-                        "type": "OBJECT",
-                        "properties": {
-                            "summary": {"type": "STRING", "description": "Title or summary of the meeting/event"},
-                            "start_time": {"type": "STRING", "description": "Start datetime in ISO 8601 format (e.g. 2026-08-20T12:00:00+05:30) or clear time text"},
-                            "end_time": {"type": "STRING", "description": "End datetime in ISO 8601 format"},
-                            "description": {"type": "STRING", "description": "Optional description of the event"},
-                            "timezone": {"type": "STRING", "description": "Timezone for the event"}
-                        },
-                        "required": ["summary"]
-                    }
-                },
-                {
-                    "name": "calendar_list_events",
-                    "description": "Lists upcoming events and meetings from Google Calendar.",
-                    "parameters": {
-                        "type": "OBJECT",
-                        "properties": {
-                            "time_min": {"type": "STRING", "description": "Filter events starting after this datetime"},
-                            "time_max": {"type": "STRING", "description": "Filter events starting before this datetime"}
-                        }
-                    }
-                },
-                {
-                    "name": "calendar_update_event",
-                    "description": "Updates an existing meeting or event on Google Calendar.",
-                    "parameters": {
-                        "type": "OBJECT",
-                        "properties": {
-                            "event_id": {"type": "STRING", "description": "ID of the event to update"},
-                            "summary": {"type": "STRING", "description": "Updated event summary"},
-                            "start_time": {"type": "STRING", "description": "Updated start time"},
-                            "end_time": {"type": "STRING", "description": "Updated end time"}
-                        }
-                    }
-                },
-                {
-                    "name": "calendar_delete_event",
-                    "description": "Deletes or cancels an event on Google Calendar.",
-                    "parameters": {
-                        "type": "OBJECT",
-                        "properties": {
-                            "event_id": {"type": "STRING", "description": "ID of the event to delete"},
-                            "summary": {"type": "STRING", "description": "Summary or title of event to delete if ID is unknown"}
-                        }
-                    }
-                }
-            ])
+    def get_tool_schemas(cls, ready_ids: List[str]) -> List[Dict[str, Any]]:
+        """Returns compact function-declaration schemas from the deterministic registry."""
+        if not ready_ids:
+            return []
+        return get_schemas_for_integrations(ready_ids)
 
-        if "int_gmail" in ready_tools:
-            schemas.extend([
-                {
-                    "name": "gmail_send_email",
-                    "description": "Sends an email notification via Gmail.",
-                    "parameters": {
-                        "type": "OBJECT",
-                        "properties": {
-                            "to": {"type": "STRING", "description": "Recipient email address"},
-                            "subject": {"type": "STRING", "description": "Subject of the email"},
-                            "body": {"type": "STRING", "description": "Body content of the email"}
-                        },
-                        "required": ["to", "subject", "body"]
-                    }
-                },
-                {
-                    "name": "gmail_search_emails",
-                    "description": "Searches email messages in Gmail.",
-                    "parameters": {
-                        "type": "OBJECT",
-                        "properties": {
-                            "query": {"type": "STRING", "description": "Search query"}
-                        },
-                        "required": ["query"]
-                    }
-                }
-            ])
+    @classmethod
+    def get_ready_tool_keys(cls, ready_ids: List[str]) -> List[str]:
+        return get_ready_tool_keys(ready_ids)
 
-        return schemas
+    @staticmethod
+    def _get_connected_ids(workspace_id: str) -> List[str]:
+        try:
+            coll = firestore_client.collection("integrations")
+            docs = coll.stream()
+            return [
+                (data.get("id") or "")
+                for doc in docs
+                for data in [doc.to_dict() or {}]
+                if data.get("workspace_id") == workspace_id and data.get("connected")
+            ]
+        except Exception as e:
+            log_error("Failed to query integrations list for dynamic registry", exc=e)
+            return []
+
+    @staticmethod
+    def _get_assigned_ids(agent_id: str) -> List[str]:
+        """Resolve which integrations are assigned to this agent via its tools list."""
+        try:
+            agent_ref = firestore_client.collection("agents").document(agent_id)
+            agent_snap = agent_ref.get()
+            agent_data = None
+            if agent_snap.exists:
+                agent_data = agent_snap.to_dict() or {}
+            else:
+                docs = firestore_client.collection("agents").stream()
+                for d in docs:
+                    ddata = d.to_dict() or {}
+                    if ddata.get("id") == agent_id or d.id == agent_id:
+                        agent_data = ddata
+                        break
+            if not agent_data:
+                return []
+            agent_tools = agent_data.get("tools") or []
+        except Exception as e:
+            log_error(f"Failed to load agent tools for dynamic registry: {agent_id}", exc=e)
+            return []
+
+        if not agent_tools:
+            return []
+
+        # Integration-name fuzzy matching: e.g. "Google Calendar" -> int_gcal
+        id_to_name = {
+            "int_gcal": ["google calendar", "calendar", "gcal", "google_calendar"],
+            "int_gmail": ["gmail", "email"],
+            "int_gdrive": ["google drive", "googledrive", "drive", "google_drive"],
+            "int_gmeet": ["google meet", "googlemeet", "meet", "google_meet"],
+            "int_slack": ["slack"],
+            "int_whatsapp": ["whatsapp", "whatsapp business"],
+            "int_hubspot": ["hubspot", "crm"],
+            "int_razorpay": ["razorpay"],
+            "int_shopify": ["shopify", "store"],
+            "int_google_maps": ["google maps", "maps", "google_maps"],
+            "int_elevenlabs": ["elevenlabs"],
+            "int_fcm": ["firebase", "fcm"],
+            "int_rest_api": ["rest api", "restapi", "rest_api", "custom api"],
+        }
+
+        assigned = set()
+        for t in agent_tools:
+            tool_identifier = ""
+            if isinstance(t, str):
+                tool_identifier = t
+            elif isinstance(t, dict):
+                tool_identifier = t.get("id") or t.get("name") or ""
+            tl = str(tool_identifier).lower().strip()
+
+            for iid, names in id_to_name.items():
+                if iid in assigned:
+                    continue
+                if iid.lower() in tl or tl in iid.lower():
+                    assigned.add(iid)
+                    continue
+                for name in names:
+                    if name in tl or tl in name:
+                        assigned.add(iid)
+                        break
+        return list(assigned)
 
     @staticmethod
     def _get_tool_description(integration_id: str) -> str:
         descriptions = {
             "int_gcal": (
-                "- GoogleCalendar.list_events(calendar_id: str = 'primary', time_min: str = None, time_max: str = None) -> lists scheduled calendar events\n"
-                "- GoogleCalendar.create_event(summary: str, start_time: str, end_time: str = None, description: str = '', timezone: str = None) -> schedules a meeting/event\n"
-                "- GoogleCalendar.update_event(event_id: str = None, summary: str = None, start_time: str = None, end_time: str = None) -> updates existing event\n"
-                "- GoogleCalendar.delete_event(event_id: str = None, summary: str = None) -> cancels/deletes event"
+                "- google_calendar.create_event(summary, start_time, end_time=None, description='', timezone='Asia/Kolkata', calendar_id='primary') -> schedules a verified meeting on Google Calendar\n"
+                "- google_calendar.list_events(time_min=None, time_max=None, calendar_id='primary') -> lists scheduled calendar events\n"
+                "- google_calendar.update_event(event_id, summary=None, start_time=None, end_time=None) -> updates an existing event\n"
+                "- google_calendar.delete_event(event_id=None, summary=None) -> cancels/deletes an event"
             ),
             "int_gmail": (
-                "- Gmail.send_email(to: str, subject: str, body: str) -> sends an email\n"
-                "- Gmail.search_emails(query: str, max_results: int = 5) -> searches emails\n"
-                "- Gmail.read_email(message_id: str) -> reads full email message"
+                "- gmail.send_email(to, subject, body) -> sends an email\n"
+                "- gmail.search_emails(query, max_results=5) -> searches emails\n"
+                "- gmail.read_email(message_id) -> reads a full email message"
             ),
-            "int_whatsapp": "- WhatsApp.send_message(phone: str, text: str) -> sends WhatsApp message",
+            "int_whatsapp": "- whatsapp.send_message(phone, text) -> sends WhatsApp message",
             "int_gdrive": (
-                "- GoogleDrive.list_files(query: str = None) -> lists files in Drive\n"
-                "- GoogleDrive.search_files(query: str) -> searches documents in Drive"
+                "- google_drive.list_files(query=None) -> lists files in Drive\n"
+                "- google_drive.search_files(query) -> searches documents in Drive"
             ),
-            "int_slack": (
-                "- Slack.send_message(channel: str, text: str) -> posts message to Slack channel\n"
-                "- Slack.list_channels() -> lists available Slack channels"
-            ),
+            "int_slack": "- slack.send_message(channel, text) -> posts message to Slack channel",
             "int_hubspot": (
-                "- HubSpot.get_contact(email: str) -> retrieves CRM contact\n"
-                "- HubSpot.create_contact(email: str, firstname: str = None, lastname: str = None) -> creates lead"
+                "- hubspot.get_contact(email) -> retrieves CRM contact\n"
+                "- hubspot.create_contact(email, firstname=None, lastname=None) -> creates lead"
             ),
-            "int_razorpay": "- Razorpay.get_payment(payment_id: str) -> retrieves transaction info\n- Razorpay.create_refund(payment_id: str, amount: float = None) -> processes a refund",
-            "int_shopify": "- Shopify.get_order(order_id: str) -> retrieves order details\n- Shopify.list_products() -> lists products catalog",
-            "int_gmeet": "- GoogleMeet.create_meeting(summary: str, start_time: str) -> returns a video meeting link",
-            "int_google_maps": "- GoogleMaps.search_places(query: str) -> searches places/locations",
-            "int_elevenlabs": "- ElevenLabs.text_to_speech(text: str, voice_id: str = None) -> generates audio clip",
-            "int_rest_api": "- CustomAPI.request(method: str, path: str, params: dict = None, body: dict = None) -> calls custom endpoint"
+            "int_razorpay": "- razorpay.get_payment(payment_id) -> retrieves transaction info\n- razorpay.create_refund(payment_id, amount=None) -> processes a refund",
+            "int_shopify": "- shopify.get_order(order_id) -> retrieves order details\n- shopify.list_products() -> lists products catalog",
+            "int_gmeet": "- google_meet.create_meeting(summary, start_time) -> returns a video meeting link",
+            "int_google_maps": "- google_maps.search_places(query) -> searches places/locations",
+            "int_elevenlabs": "- elevenlabs.text_to_speech(text, voice_id=None) -> generates audio clip",
+            "int_rest_api": "- rest_api.request(method, path, params=None, body=None) -> calls custom endpoint",
         }
         return descriptions.get(integration_id, "")

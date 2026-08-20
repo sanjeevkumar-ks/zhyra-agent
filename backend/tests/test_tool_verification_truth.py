@@ -33,7 +33,11 @@ class TestToolVerificationTruth(unittest.TestCase):
             tool_result=tool_result
         )
         self.assertEqual(res.status, "failed")
-        self.assertIn("couldn't complete", res.message.lower())
+        self.assertTrue(
+            "couldn't complete" in res.message.lower()
+            or "wasn't able to complete" in res.message.lower()
+        )
+        self.assertNotIn("i've created", res.message.lower())
         self.assertFalse(any(b.type == "calendar_event" for b in res.blocks))
         self.assertTrue(any(b.type == "integration_error" for b in res.blocks))
 
@@ -44,7 +48,12 @@ class TestToolVerificationTruth(unittest.TestCase):
             tool_result=None
         )
         self.assertEqual(res.status, "failed")
-        self.assertIn("couldn't complete", res.message.lower())
+        # Verification gate replaces the unverified success claim with a refusal
+        self.assertTrue(
+            "couldn't complete" in res.message.lower()
+            or "wasn't able to complete" in res.message.lower()
+        )
+        self.assertNotIn("i've created", res.message.lower())
 
     def test_relative_date_resolution_tomorrow(self):
         provider = GoogleCalendarProvider()

@@ -1,12 +1,32 @@
+import json
+import re
+import time
+import uuid
+from typing import Dict, Any, Optional, List
+
 from app.database.firestore import firestore_client
 from app.utils.logger import log_info, log_error
-import httpx
-import json
-import uuid
+from app.ai.tools.models import ToolCall, ToolExecutionRecord
+from app.ai.tools import tool_registry
+
 
 class ToolExecutor:
+    """Verified tool execution layer.
+
+    Every execution produces a ``ToolExecutionRecord`` with an explicit state:
+
+      - PENDING   created before execution starts
+      - EXECUTING the integration provider has been invoked
+      - SUCCEEDED provider returned a verifiable success signal (+ resource ID
+                  for create/send style actions)
+      - FAILED    provider returned an error, preflight failed, tool not found,
+                  or the response could not be verified
+
+    Success is never fabricated: a plain-text or empty provider response is a
+    FAILED record with ``error_code=UNVERIFIED_RESPONSE``.
+    """
+
     TOOL_DISPATCHER = {
-        # Google Calendar
         "GoogleCalendar.createEvent": ("int_gcal", "create_event"),
         "GoogleCalendar.create_event": ("int_gcal", "create_event"),
         "calendar_create_event": ("int_gcal", "create_event"),
@@ -19,7 +39,7 @@ class ToolExecutor:
         "GoogleCalendar.deleteEvent": ("int_gcal", "delete_event"),
         "GoogleCalendar.delete_event": ("int_gcal", "delete_event"),
         "calendar_delete_event": ("int_gcal", "delete_event"),
-        
+
         # Gmail
         "Gmail.sendEmail": ("int_gmail", "send_email"),
         "Gmail.send_email": ("int_gmail", "send_email"),
@@ -43,144 +63,237 @@ class ToolExecutor:
         "Slack.sendMessage": ("int_slack", "send_message"),
         "Slack.send_message": ("int_slack", "send_message"),
         "slack_send_message": ("int_slack", "send_message"),
-
-        # HubSpot
-        "HubSpot.getContact": ("int_hubspot", "get_contact"),
-        "HubSpot.createContact": ("int_hubspot", "create_contact"),
-        "HubSpot.listDeals": ("int_hubspot", "list_deals"),
-
-        # Shopify
-        "Shopify.getOrder": ("int_shopify", "get_order"),
-        "Shopify.listProducts": ("int_shopify", "list_products"),
     }
 
+    # Recent tool_call_id dedupe keyed by conversation: {(conversation_id, tool_call_id): ts}
+    _recent_calls: Dict[tuple, float] = {}
+    _DEDUPE_WINDOW_SECONDS = 600
+
     @classmethod
-    async def execute(cls, workspace_id: str, tool_name: str, method_name: str, args: dict, agent_id: str = "unknown") -> dict:
-        """Parses and executes the tool call using TOOL_DISPATCHER, checking connections and returning normalized responses."""
-        log_info(f"[AGENT] Tool call received")
-        log_info(f"[AGENT] Tool: {tool_name}.{method_name}")
-        log_info(f"[AGENT] Resolving tool")
+    def _is_duplicate(cls, tool_call_id: str, conversation_id: str = "") -> bool:
+        if not tool_call_id:
+            return False
+        key = (conversation_id or "", tool_call_id)
+        now = time.time()
+        # Prune stale entries
+        cls._recent_calls = {
+            k: v for k, v in cls._recent_calls.items()
+            if now - v < cls._DEDUPE_WINDOW_SECONDS
+        }
+        if key in cls._recent_calls:
+            return True
+        cls._recent_calls[key] = now
+        return False
 
-        tool_key = f"{tool_name}.{method_name}" if method_name else tool_name
-        target = cls.TOOL_DISPATCHER.get(tool_key)
+    @classmethod
+    async def execute_tool_call(
+        cls,
+        workspace_id: str,
+        agent_id: str,
+        tool_call: ToolCall,
+        conversation_id: str = "",
+        user_id: str = "",
+        mode: str = "live",
+    ) -> ToolExecutionRecord:
+        """Executes a single structured ToolCall and returns an auditable record.
 
-        if not target and "." in tool_name:
-            parts = tool_name.split(".", 1)
-            tool_key = f"{parts[0]}.{parts[1]}"
-            target = cls.TOOL_DISPATCHER.get(tool_key)
-
-        if not target and method_name:
-            # Fallback lookup by method_name or tool_name
-            for k, val in cls.TOOL_DISPATCHER.items():
-                if k.lower() == tool_key.lower() or k.endswith(f".{method_name}"):
-                    target = val
-                    break
-
-        if target:
-            integration_id, resolved_method = target
-            log_info(f"[AGENT] Tool resolved: {integration_id}.{resolved_method}")
-        else:
-            # Fallback dynamic mapping
-            tool_name_lower = tool_name.lower()
-            integration_id = "int_gcal" if ("calendar" in tool_name_lower or "event" in tool_name_lower) else tool_name
-            resolved_method = method_name or "execute"
-            log_info(f"[AGENT] Tool resolved (dynamic fallback): {integration_id}.{resolved_method}")
-
-        log_info(f"[AGENT] Executing tool")
-
-        # 1. Run Preflight Validation Check
-        from app.ai.integration.preflight import IntegrationPreflight
-        from app.ai.integration.normalizer import ToolResultNormalizer
-        from app.services.analytics_service import AnalyticsService
-        from app.services.notification_service import NotificationService
-        
-        AnalyticsService.record_event(
+        ``mode``:
+          - ``"live"``      real execution against the connected integration.
+          - ``"simulation"`` resolves the tool, runs the real preflight checks
+                            (assignment + connection + OAuth resolution) but
+                            short-circuits the external API call. The returned
+                            record is marked ``simulated=True`` and never claims
+                            a real external action happened.
+        """
+        started = time.time()
+        record = ToolExecutionRecord(
+            id=f"tre_{uuid.uuid4().hex[:10]}",
+            tool_call_id=tool_call.id,
             workspace_id=workspace_id,
-            event_type="tool_started",
             agent_id=agent_id,
-            tool_name=tool_key
+            conversation_id=conversation_id,
+            tool=tool_call.name,
+            action=tool_call.action or "execute",
+            integration_id=tool_call.integration_id,
+            status="PENDING",
+            started_at=started,
         )
 
-        preflight = await IntegrationPreflight.check(workspace_id, agent_id, integration_id)
+        # 1. Duplicate protection (scoped per conversation)
+        if cls._is_duplicate(tool_call.id, conversation_id):
+            return cls._finalize(record, "FAILED", "DUPLICATE_TOOL_CALL",
+                                 "This tool call was already executed in this conversation.", started)
+
+        # 2. Resolve tool via deterministic registry
+        resolved = tool_registry.resolve(
+            tool_call.name,
+            method=tool_call.action,
+            raw_name=tool_call.raw_name,
+        )
+        if not resolved:
+            return cls._finalize(record, "FAILED", "TOOL_NOT_FOUND",
+                                 f"Tool '{tool_call.name}' is not registered. Only registered tools may execute.", started)
+
+        integration_id = resolved["integration_id"]
+        action = resolved["action"]
+        record.integration_id = integration_id
+        record.action = action
+
+        # 3. Lightweight connection / assignment check (no network)
+        from app.ai.integration.preflight import IntegrationPreflight
+        preflight = await IntegrationPreflight.check(workspace_id, agent_id, integration_id, lightweight=True)
         if preflight.status != "READY":
-            log_info(f"[INTEGRATION] Preflight check status: {preflight.status} message={preflight.message}")
-            err_res = ToolResultNormalizer.normalize_error(
-                tool_name, resolved_method, preflight.status, preflight.message
-            )
-            AnalyticsService.record_event(
-                workspace_id=workspace_id,
-                event_type="tool_failed",
-                agent_id=agent_id,
-                tool_name=tool_key,
-                success=False,
-                metadata={"error": preflight.message}
-            )
-            NotificationService.create_notification(
-                workspace_id=workspace_id,
-                type="tool_failed",
-                title=f"Tool Action Failed — {tool_name}",
-                message=f"Action '{resolved_method}' failed for agent {agent_id}: {preflight.message}",
-                severity="error",
-                entity_type="tool",
-                entity_id=tool_key
-            )
-            return err_res
-            
-        # 2. Execute provider capability
+            return cls._finalize(record, "FAILED", preflight.status,
+                                 preflight.message, started)
+
+        # 3b. Simulation mode: no external API call is made. The record is
+        #     clearly marked simulated so the UI can never mistake it for a
+        #     real external action.
+        if mode == "simulation":
+            return cls._finalize_simulated(record, action, tool_call.args, started)
+
+        # 4. Execute the provider capability
+        record.status = "EXECUTING"
         try:
             from app.services.integration_service import IntegrationService
             provider = IntegrationService._get_provider(integration_id)
-            res = await provider.execute(workspace_id, resolved_method, args)
-            
-            log_info(f"[AGENT] Tool result returned")
-            
-            if isinstance(res, str) and res.startswith("Error:"):
-                AnalyticsService.record_event(
-                    workspace_id=workspace_id,
-                    event_type="tool_failed",
-                    agent_id=agent_id,
-                    tool_name=tool_key,
-                    success=False,
-                    metadata={"error": res}
-                )
-                NotificationService.create_notification(
-                    workspace_id=workspace_id,
-                    type="tool_failed",
-                    title=f"Tool Failure — {tool_name}",
-                    message=f"Execution failed for {resolved_method}: {res[:150]}",
-                    severity="error",
-                    entity_type="tool",
-                    entity_id=tool_key
-                )
-            else:
-                AnalyticsService.record_event(
-                    workspace_id=workspace_id,
-                    event_type="tool_succeeded",
-                    agent_id=agent_id,
-                    tool_name=tool_key,
-                    success=True
-                )
+            result = await provider.execute(workspace_id, action, tool_call.args)
 
-            if isinstance(res, dict):
-                return res
-            return ToolResultNormalizer.normalize_response(tool_name, resolved_method, res)
+            if isinstance(result, dict):
+                return cls._record_from_dict(record, result, started)
+            if isinstance(result, str):
+                return cls._record_from_string(record, result, started)
+            return cls._finalize(record, "FAILED", "UNVERIFIED_RESPONSE",
+                                 "Integration returned an unverifiable response type.", started)
         except Exception as e:
-            log_error(f"Tool execution error for {tool_key}", exc=e)
-            AnalyticsService.record_event(
-                workspace_id=workspace_id,
-                event_type="tool_failed",
-                agent_id=agent_id,
-                tool_name=tool_key,
-                success=False,
-                metadata={"error": str(e)}
+            log_error(f"Tool execution error for {tool_call.name}.{action}", exc=e)
+            return cls._finalize(record, "FAILED", "EXECUTION_ERROR", str(e), started)
+
+    @classmethod
+    def _finalize_simulated(cls, record: ToolExecutionRecord, action: str, args: dict, started: float) -> ToolExecutionRecord:
+        """Builds a clearly-labelled simulated record. No external API is called."""
+        record.status = "SUCCEEDED"
+        record.external_resource_id = f"sim_{uuid.uuid4().hex[:10]}"
+        record.message = (
+            f"[Simulated] {action} resolved — no external API was called and no real "
+            f"{record.tool} action occurred."
+        )
+        record.data = {
+            "simulated": True,
+            "action": action,
+            "args": args or {},
+        }
+        record.simulated = True
+        record.completed_at = time.time()
+        record.duration_ms = int((record.completed_at - started) * 1000)
+        try:
+            firestore_client.collection("tool_executions").document(record.id).set(
+                record.to_dict()
             )
-            NotificationService.create_notification(
-                workspace_id=workspace_id,
-                type="tool_failed",
-                title=f"Tool Exception — {tool_name}",
-                message=f"Unexpected error executing {resolved_method}: {str(e)}",
-                severity="error",
-                entity_type="tool",
-                entity_id=tool_key
+        except Exception as e:
+            log_error("Failed to persist simulated tool execution record", exc=e)
+        return record
+
+    @classmethod
+    def _record_from_dict(cls, record: ToolExecutionRecord, result: Dict[str, Any], started: float) -> ToolExecutionRecord:
+        if result.get("success") is True:
+            data = result.get("data") or {}
+            external_id = (
+                data.get("event_id") or data.get("message_id") or data.get("id")
+                or data.get("external_resource_id") or result.get("external_resource_id")
+                or result.get("event_id")
             )
-            return ToolResultNormalizer.normalize_error(tool_name, resolved_method, "EXECUTION_ERROR", str(e))
+            record.data = data
+            record.external_resource_id = external_id
+            record.message = result.get("message") or "Action completed and verified."
+            return cls._finalize(record, "SUCCEEDED", None, record.message, started)
+
+        return cls._finalize(
+            record,
+            "FAILED",
+            result.get("error_code") or "PROVIDER_ERROR",
+            result.get("message") or "Integration returned an error.",
+            started,
+            data=result,
+        )
+
+    @classmethod
+    def _record_from_string(cls, record: ToolExecutionRecord, text: str, started: float) -> ToolExecutionRecord:
+        text_stripped = (text or "").strip()
+        if not text_stripped or text_stripped.lower().startswith("error:"):
+            code = "PROVIDER_ERROR" if text_stripped else "UNVERIFIED_RESPONSE"
+            return cls._finalize(record, "FAILED", code, text_stripped or "Empty response.", started)
+
+        # Verified success requires either an embedded resource ID or an
+        # explicit read/search acknowledgement from a real API call.
+        resource_id = cls._extract_resource_id(text_stripped)
+        is_success_marker = "successfully" in text_stripped.lower()
+        is_read_result = any(kw in text_stripped.lower() for kw in ["found", "no emails", "no events", "details"])
+
+        if (is_success_marker and resource_id) or is_read_result:
+            record.external_resource_id = resource_id
+            record.message = text_stripped
+            record.data = {"message": text_stripped}
+            return cls._finalize(record, "SUCCEEDED", None, text_stripped, started)
+
+        return cls._finalize(record, "FAILED", "UNVERIFIED_RESPONSE",
+                             text_stripped[:160], started)
+
+    @staticmethod
+    def _extract_resource_id(text: str) -> Optional[str]:
+        patterns = [
+            r"Message ID:\s*(\S+)",
+            r"Draft ID:\s*(\S+)",
+            r"event_id:\s*(\S+)",
+            r"message_id:\s*(\S+)",
+            r"ID:\s*([a-zA-Z0-9_\-]{4,})",
+            r"id:\s*([a-zA-Z0-9_\-]{4,})",
+        ]
+        for pat in patterns:
+            m = re.search(pat, text, re.IGNORECASE)
+            if m:
+                return m.group(1)
+        return None
+
+    @classmethod
+    def _finalize(
+        cls,
+        record: ToolExecutionRecord,
+        status: str,
+        error_code: Optional[str],
+        message: str,
+        started: float,
+        data: Optional[Dict[str, Any]] = None,
+    ) -> ToolExecutionRecord:
+        record.status = status
+        record.error_code = error_code
+        record.message = message
+        if data:
+            record.data = data
+        record.completed_at = time.time()
+        record.duration_ms = int((record.completed_at - started) * 1000)
+        try:
+            firestore_client.collection("tool_executions").document(record.id).set(
+                record.to_dict()
+            )
+        except Exception as e:
+            log_error("Failed to persist tool execution record", exc=e)
+        return record
+
+    @classmethod
+    async def execute(cls, workspace_id: str, tool_name: str, method_name: str, args: dict, agent_id: str = "unknown", mode: str = "live") -> dict:
+        """Backward-compatible wrapper that returns a plain dict result."""
+        tool_call = ToolCall(
+            id=f"call_legacy_{uuid.uuid4().hex[:6]}",
+            name=tool_name,
+            action=method_name or "execute",
+            args=args or {},
+            raw_name=tool_name,
+        )
+        record = await cls.execute_tool_call(
+            workspace_id=workspace_id,
+            agent_id=agent_id,
+            tool_call=tool_call,
+            mode=mode,
+        )
+        return record.to_user_payload()

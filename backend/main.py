@@ -13,7 +13,8 @@ from app.middleware.auth import is_bypass_auth
 from app.api import (
     auth, users, workspaces, agents, conversations,
     knowledge, voice, settings, providers, integrations,
-    billing, analytics, memory, team, workflows, context, notifications, widget
+    billing, analytics, memory, team, workflows, context, notifications, widget,
+    admin_debug, playground,
 )
 from app.api.admin import (
     auth as admin_auth,
@@ -135,6 +136,7 @@ app.include_router(notifications.router, prefix="/api/notifications", tags=["Not
 app.include_router(widget.router, prefix="/api/widget", tags=["Embeddable Widget"])
 app.include_router(widget.router, prefix="/api/chat", tags=["Widget Chat Alias"])
 app.include_router(widget.router, prefix="/api", tags=["Widget Direct Alias"])
+app.include_router(playground.router, prefix="/api/playground", tags=["AI Testing Playground"])
 app.include_router(admin_auth.router, prefix="/api/admin/auth", tags=["Admin Auth"])
 app.include_router(admin_users.router, prefix="/api/admin/users", tags=["Admin Users"])
 app.include_router(admin_invites.router, prefix="/api/admin/invites", tags=["Admin Invites"])
@@ -147,6 +149,7 @@ app.include_router(admin_conversations.router, prefix="/api/admin/conversations"
 app.include_router(admin_issues.router, prefix="/api/admin/issues", tags=["Admin Issues"])
 app.include_router(admin_integrations.router, prefix="/api/admin/integrations", tags=["Admin Integrations"])
 app.include_router(admin_health.router, prefix="/api/admin/health", tags=["Admin Health"])
+app.include_router(admin_debug.router, prefix="/api/admin", tags=["Admin Debug"])
 
 @app.get("/", tags=["Health"])
 @app.get("/health", tags=["Health"])

@@ -30,10 +30,10 @@ class TestToolExecutionLayer(unittest.TestCase):
 
     def test_dynamic_registry_descriptions(self):
         desc = DynamicToolRegistry._get_tool_description("int_gcal")
-        self.assertIn("GoogleCalendar.create_event", desc)
-        self.assertIn("GoogleCalendar.list_events", desc)
-        self.assertIn("GoogleCalendar.update_event", desc)
-        self.assertIn("GoogleCalendar.delete_event", desc)
+        self.assertIn("google_calendar.create_event", desc)
+        self.assertIn("google_calendar.list_events", desc)
+        self.assertIn("google_calendar.update_event", desc)
+        self.assertIn("google_calendar.delete_event", desc)
 
     def test_dynamic_registry_tool_schemas(self):
         schemas = DynamicToolRegistry.get_tool_schemas(["int_gcal"])

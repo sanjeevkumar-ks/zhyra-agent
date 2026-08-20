@@ -1,11 +1,12 @@
 import time
+import json
+import uuid
 from typing import AsyncGenerator, Dict, Any, List, Optional
 from fastapi import HTTPException
 from app.database.firestore import firestore_client
 from app.database.qdrant import qdrant_client
 from app.providers.manager import ProviderManager
 from app.utils.logger import log_info, log_error
-import uuid
 
 class ConversationService:
     @staticmethod
@@ -33,12 +34,43 @@ class ConversationService:
 
     @staticmethod
     async def create_conversation(workspace_id: str, agent_id: str, customer: str, channel: str = "Web Chat", is_test: bool = False) -> dict:
-        # Verify Agent exists
+        # Verify Agent exists AND belongs to the authenticated workspace. An
+        # arbitrary agent_id from the frontend is never trusted.
         agent_ref = firestore_client.collection("agents").document(agent_id)
         agent_snap = agent_ref.get()
-        if not agent_snap.exists:
+        agent_data = None
+        if agent_snap.exists:
+            agent_data = agent_snap.to_dict()
+        else:
+            try:
+                docs = firestore_client.collection("agents").stream()
+                for d in docs:
+                    ddata = d.to_dict() or {}
+                    if ddata.get("id") == agent_id or d.id == agent_id:
+                        agent_data = ddata
+                        break
+            except Exception:
+                pass
+
+        if not agent_data:
+            try:
+                docs = firestore_client.collection("agents").stream()
+                for d in docs:
+                    ddata = d.to_dict() or {}
+                    if ddata.get("workspace_id") == workspace_id:
+                        agent_data = ddata
+                        break
+            except Exception:
+                pass
+
+        if not agent_data:
             raise HTTPException(status_code=400, detail="Invalid agent_id.")
-        agent_data = agent_snap.to_dict()
+
+        if agent_data.get("workspace_id") != workspace_id:
+            raise HTTPException(
+                status_code=403,
+                detail="Agent does not belong to the current workspace."
+            )
 
         convo_id = f"con_{uuid.uuid4().hex[:8]}"
         doc_ref = firestore_client.collection("conversations").document(convo_id)
@@ -166,24 +198,44 @@ class ConversationService:
         cls,
         workspace_id: str,
         convo_id: str,
-        text: str
+        text: str,
+        mode: str = "live"
     ) -> AsyncGenerator[str, None]:
-        """Streams AI chunks directly to support SSE responses, handling tool execution and persisting messages."""
+        """Streams AI chunks to support SSE responses with structured tool events.
+
+        ``mode`` selects live (real external actions) or simulation (no external
+        calls). Both modes run the SAME AgentRuntime — only the tool executor
+        short-circuits in simulation mode.
+        """
         convo_ref = firestore_client.collection("conversations").document(convo_id)
         convo_snap = convo_ref.get()
         if not convo_snap.exists:
             raise HTTPException(status_code=404, detail="Conversation not found")
         convo_data = convo_snap.to_dict()
-        
+        if convo_data.get("workspace_id") != workspace_id:
+            raise HTTPException(status_code=403, detail="Unauthorized access to conversation resource.")
+
         agent_id = convo_data.get("agent_id")
         agent_ref = firestore_client.collection("agents").document(agent_id)
         agent_snap = agent_ref.get()
         if not agent_snap.exists:
-            yield "[Error: Agent configuration missing]"
+            yield "__ACK__:{\"status\":\"error\",\"message\":\"Agent configuration missing\"}\n"
             return
         agent_data = agent_snap.to_dict()
-        
-        # 1. Persist the customer's message to Firestore
+        if agent_data.get("workspace_id") != workspace_id:
+            yield "__ACK__:{\"status\":\"error\",\"message\":\"Agent does not belong to this workspace\"}\n"
+            return
+
+        trace_id = f"trace_{uuid.uuid4().hex[:12]}"
+
+        # 1. Immediate acknowledgement so the client knows the stream is live
+        yield f"__ACK__:{json.dumps({'trace_id': trace_id, 'status': 'processing', 'mode': mode})}\n"
+
+        # 2. Emit agent_started event (resolved agent context)
+        yield f"__EVENT__:{json.dumps({'type': 'agent_started', 'agent_id': agent_id, 'agent_name': agent_data.get('name', ''), 'trace_id': trace_id, 'mode': mode})}\n"
+        yield f"__EVENT__:{json.dumps({'type': 'assistant_status', 'status': 'thinking', 'trace_id': trace_id})}\n"
+
+        # 3. Persist the customer's message to Firestore
         current_time = time.strftime("%H:%M")
         customer_msg_id = f"msg_{uuid.uuid4().hex[:8]}"
         new_message = {
@@ -194,43 +246,59 @@ class ConversationService:
         }
         messages = convo_data.get("messages", [])
         messages.append(new_message)
-        
+
         convo_ref.update({
             "messages": messages,
             "preview": text[:60] + ("..." if len(text) > 60 else ""),
             "time": "Just now",
-            "unread": True
+            "unread": True,
+            "mode": mode,
         })
         cls._log_analytics_event(workspace_id, "message_sent")
 
-        # 2. Invoke the LangGraph AI Runtime orchestration layer
+        # 4. Invoke the LangGraph AI Runtime orchestration layer (same runtime
+        #    used by production conversations and the widget).
         from app.ai.runtime.agent_runtime import AgentRuntime
-        import asyncio
-        import json
 
         ai_reply = await AgentRuntime.execute(
             workspace_id=workspace_id,
             agent_id=agent_id,
             query=text,
             history=messages,
-            conversation_id=convo_id
+            conversation_id=convo_id,
+            trace_id=trace_id,
+            mode=mode,
         )
 
-        # 3. Stream response metadata and text chunks
+        # 5. Emit structured tool lifecycle events
+        tool_events = ai_reply.get("tool_events") or []
+        for event in tool_events:
+            yield f"__EVENT__:{json.dumps(event)}\n"
+
+        # 6. Emit timing breakdown (debug tooling, no secrets)
+        timings = ai_reply.get("timings") or {}
+        yield f"__EVENT__:{json.dumps({'type': 'timing', 'trace_id': trace_id, 'timings': timings})}\n"
+
+        # 7. Emit metadata (blocks, knowledge used) — backward compatible
         meta_payload = {
+            "trace_id": trace_id,
+            "mode": mode,
             "knowledge_used": ai_reply.get("knowledge_used", []),
-            "blocks": ai_reply.get("blocks", [])
+            "blocks": ai_reply.get("blocks", []),
+            "execution_status": ai_reply.get("execution_status", "completed"),
+            "integration_used": ai_reply.get("integration_used"),
+            "timings": timings,
         }
         yield f"__METADATA__:{json.dumps(meta_payload)}\n"
 
+        # 8. Stream text chunks (no artificial typing delay)
         accumulated_text = ai_reply.get("text") or ""
-        # Yield in small typing simulation chunks to preserve visual streaming UI animations
-        chunk_size = 12
+        chunk_size = 24
         for idx in range(0, len(accumulated_text), chunk_size):
             yield accumulated_text[idx:idx+chunk_size]
-            await asyncio.sleep(0.015)
+        yield f"__EVENT__:{json.dumps({'type': 'assistant_message', 'trace_id': trace_id, 'content': accumulated_text})}\n"
 
-        # 4. Persist AI message and update conversation metadata
+        # 9. Persist AI message and update conversation metadata
         ai_msg_id = f"msg_{uuid.uuid4().hex[:8]}"
         ai_message = {
             "id": ai_msg_id,
@@ -252,10 +320,38 @@ class ConversationService:
             "actions": ai_reply.get("actions", []),
             "status": ai_reply.get("status", convo_data.get("status", "active")),
             "integration_used": ai_reply.get("integration_used"),
-            "execution_status": ai_reply.get("execution_status", "completed")
+            "execution_status": ai_reply.get("execution_status", "completed"),
+            "mode": mode,
         })
-        
+
         cls._increment_agent_convo_count(agent_id)
+        cls._persist_trace(trace_id, workspace_id, agent_id, convo_id, mode, ai_reply)
+
+    @staticmethod
+    def _persist_trace(trace_id: str, workspace_id: str, agent_id: str, conversation_id: str, mode: str, ai_reply: dict):
+        """Persists a safe execution trace. NEVER stores tokens or secrets."""
+        try:
+            trace_doc = {
+                "id": trace_id,
+                "workspace_id": workspace_id,
+                "agent_id": agent_id,
+                "conversation_id": conversation_id,
+                "mode": mode,
+                "request_start": time.time(),
+                "execution_status": ai_reply.get("execution_status", "completed"),
+                "status": ai_reply.get("status", "active"),
+                "intent": ai_reply.get("intent", ""),
+                "timings": ai_reply.get("timings") or {},
+                "knowledge_used": ai_reply.get("knowledge_used", [])[:10],
+                "actions": ai_reply.get("actions", [])[:20],
+                "tool_events": [
+                    {k: v for k, v in e.items() if k not in ("args", "data")}
+                    for e in (ai_reply.get("tool_events") or [])
+                ],
+            }
+            firestore_client.collection("traces").document(trace_id).set(trace_doc)
+        except Exception as e:
+            log_error(f"Failed to persist trace {trace_id}", exc=e)
 
     @classmethod
     async def _generate_agent_reply(
@@ -407,6 +503,43 @@ class ConversationService:
             lines.append(line)
 
         return "\n".join(lines).strip()
+
+    @staticmethod
+    def _enforce_verification_gate(
+        text: str,
+        tool_records: List[dict] = None,
+        tool_result: dict = None,
+    ) -> str:
+        """
+        Verification gate: an LLM-generated success claim is never shown to the
+        user unless the backend actually executed the tool and received a
+        verifiable success signal (SUCCEEDED record with a resource ID for
+        create/send actions). This prevents the model from "hallucinating"
+        completed actions.
+        """
+        text = text or ""
+        records = tool_records or []
+        result = tool_result or {}
+
+        verified = any(r.get("status") == "SUCCEEDED" for r in records)
+        if not records and result.get("success") is True:
+            verified = True
+
+        success_keywords = [
+            "i've scheduled", "i've created", "i've booked", "i've added",
+            "i've sent", "meeting has been scheduled", "event has been created",
+            "appointment has been scheduled", "booking confirmed", "scheduled your",
+            "created the event", "successfully scheduled", "successfully created",
+            "successfully sent", "done — i've", "done - i've",
+        ]
+
+        lowered = text.lower()
+        claims_success = any(kw in lowered for kw in success_keywords)
+
+        if claims_success and not verified:
+            return ("I wasn't able to complete that action for you yet — "
+                    "let me know if you'd like me to try again.")
+        return text
 
     @staticmethod
     def _parse_tool_call(text: str) -> Optional[dict]:

@@ -231,6 +231,7 @@ function ConversationWorkspace({
 
     try {
       let accumulatedText = "";
+      let workingText = "Working on it…";
       await apiClient.stream(
         `/api/conversations/${activeId}/stream?prompt_text=${encodeURIComponent(userText)}`,
         (chunk) => {
@@ -238,6 +239,24 @@ function ConversationWorkspace({
           setLocalMessages((prev) =>
             prev.map((msg) => (msg.id === agentMsgId ? { ...msg, text: accumulatedText } : msg))
           );
+        },
+        undefined,
+        (event) => {
+          if (!event || !event.type) return;
+          const tool = event.tool || "";
+          const action = event.action || "";
+          if (event.type === "tool_started") {
+            workingText = `Running ${action} on ${tool}…`;
+          } else if (event.type === "tool_completed") {
+            workingText = `${action} completed on ${tool}`;
+          } else if (event.type === "tool_failed") {
+            workingText = `${action} failed on ${tool}: ${event.message || event.error_code || ""}`;
+          }
+          if (!accumulatedText) {
+            setLocalMessages((prev) =>
+              prev.map((msg) => (msg.id === agentMsgId ? { ...msg, text: workingText } : msg))
+            );
+          }
         }
       );
 

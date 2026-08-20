@@ -25,11 +25,18 @@ class IntegrationResolver:
         cls,
         workspace_id: str,
         agent_id: str,
-        provider_or_tool: str
+        provider_or_tool: str,
+        lightweight: bool = True
     ) -> Tuple[str, str, Dict[str, Any]]:
         """
         Centralized connection resolution.
-        
+
+        In lightweight mode (default for the runtime path) this is a pure
+        Firestore read: it NEVER makes a network call, never validates the
+        token against Google, and never attempts a token refresh. Token
+        validation and refresh happen only at actual tool execution time, so
+        per-request LLM latency is not eaten by OAuth calls.
+
         Returns:
             Tuple of (status_code, user_facing_message, details_dict)
             
@@ -51,8 +58,21 @@ class IntegrationResolver:
             try:
                 agent_ref = firestore_client.collection("agents").document(agent_id)
                 agent_snap = agent_ref.get()
+                agent_data = None
                 if agent_snap.exists:
                     agent_data = agent_snap.to_dict() or {}
+                else:
+                    try:
+                        docs = firestore_client.collection("agents").stream()
+                        for d in docs:
+                            ddata = d.to_dict() or {}
+                            if ddata.get("id") == agent_id or d.id == agent_id:
+                                agent_data = ddata
+                                break
+                    except Exception:
+                        pass
+
+                if agent_data:
                     agent_tools = agent_data.get("tools", [])
 
                     # Parse tool representations (strings or dicts)
@@ -83,7 +103,31 @@ class IntegrationResolver:
                             if integration_id == "int_gdrive" and ("drive" in tool_identifier or "gdrive" in tool_identifier):
                                 assigned = True
                                 break
+                            if integration_id == "int_gmeet" and ("meet" in tool_identifier or "gmeet" in tool_identifier):
+                                assigned = True
+                                break
                             if integration_id == "int_slack" and "slack" in tool_identifier:
+                                assigned = True
+                                break
+                            if integration_id == "int_whatsapp" and ("whatsapp" in tool_identifier or "whats app" in tool_identifier):
+                                assigned = True
+                                break
+                            if integration_id == "int_hubspot" and ("hubspot" in tool_identifier or "crm" in tool_identifier):
+                                assigned = True
+                                break
+                            if integration_id == "int_razorpay" and "razorpay" in tool_identifier:
+                                assigned = True
+                                break
+                            if integration_id == "int_shopify" and ("shopify" in tool_identifier or "store" in tool_identifier):
+                                assigned = True
+                                break
+                            if integration_id == "int_google_maps" and ("maps" in tool_identifier or "google maps" in tool_identifier):
+                                assigned = True
+                                break
+                            if integration_id == "int_elevenlabs" and ("elevenlabs" in tool_identifier or "voice" in tool_identifier):
+                                assigned = True
+                                break
+                            if integration_id == "int_rest_api" and ("rest" in tool_identifier or "custom api" in tool_identifier):
                                 assigned = True
                                 break
 
@@ -138,6 +182,8 @@ class IntegrationResolver:
             )
 
         # 4. OAuth Scope and Expiry Check (for Google OAuth services)
+        #    In lightweight mode: only check presence of a refresh/access token.
+        #    No network validation, no refresh attempt (that happens at execution).
         if integration_id in {"int_gcal", "int_gmail", "int_gdrive", "int_gmeet"}:
             refresh_token = creds.get("refresh_token")
             access_token = creds.get("access_token")
@@ -149,38 +195,70 @@ class IntegrationResolver:
                     {"integration_id": integration_id}
                 )
 
-            # Perform automatic token refresh if access_token missing or validation fails
-            from app.integrations.oauth_helpers import refresh_google_token
-            if refresh_token:
-                try:
-                    # Test credentials or refresh directly
-                    from app.services.integration_service import IntegrationService
-                    provider = IntegrationService._get_provider(integration_id)
-                    is_valid = await provider.validate(data.get("config", {}), creds) if provider else False
-                    
-                    if not is_valid:
-                        log_info(f"[Resolver] Token invalid for {integration_id}. Attempting refresh for workspace {workspace_id}...")
-                        new_tokens = await refresh_google_token(refresh_token)
-                        if new_tokens and new_tokens.get("access_token"):
-                            creds["access_token"] = new_tokens["access_token"]
-                            save_credentials(workspace_id, integration_id, creds)
-                            log_info(f"[Resolver] Token successfully refreshed and saved for {integration_id}")
-                        else:
-                            return (
-                                "TOKEN_REFRESH_FAILED",
-                                "Google Calendar authorization needs to be refreshed.",
-                                {"integration_id": integration_id}
-                            )
-                except Exception as ref_err:
-                    log_error(f"[Resolver] Automatic token refresh failed for {integration_id}", exc=ref_err)
-                    return (
-                        "TOKEN_REFRESH_FAILED",
-                        "Google Calendar authorization needs to be refreshed.",
-                        {"integration_id": integration_id, "error": str(ref_err)}
-                    )
+            if lightweight:
+                # Presence is enough for the runtime path. Execution will refresh.
+                return (
+                    "CONNECTED",
+                    f"{provider_or_tool} is connected and ready.",
+                    {"integration_id": integration_id, "workspace_id": workspace_id, "token_state": "present"}
+                )
 
-        return (
-            "CONNECTED",
-            f"{provider_or_tool} is connected and ready.",
-            {"integration_id": integration_id, "workspace_id": workspace_id}
-        )
+            # Non-lightweight (explicit status checks): decide if a refresh is
+            # actually needed using expiry metadata, and only then refresh once.
+            from app.integrations.oauth_helpers import (
+                google_access_token_valid,
+                refresh_google_token,
+                GoogleOAuthRefreshError,
+            )
+
+            if google_access_token_valid(creds):
+                return (
+                    "CONNECTED",
+                    f"{provider_or_tool} is connected and ready.",
+                    {"integration_id": integration_id, "workspace_id": workspace_id, "token_state": "valid"}
+                )
+
+            if not refresh_token:
+                return (
+                    "TOKEN_EXPIRED",
+                    "Google Calendar authorization has expired. Please reconnect your account.",
+                    {"integration_id": integration_id, "token_state": "expired_no_refresh"}
+                )
+
+            try:
+                log_info(f"[Resolver] Access token expired/mismatched for {integration_id}. Refreshing once for workspace {workspace_id}...")
+                new_tokens = await refresh_google_token(refresh_token)
+                if new_tokens and new_tokens.get("access_token"):
+                    creds["access_token"] = new_tokens["access_token"]
+                    if new_tokens.get("expires_at"):
+                        creds["expires_at"] = new_tokens["expires_at"]
+                    if new_tokens.get("client_id"):
+                        creds["client_id"] = new_tokens["client_id"]
+                    save_credentials(workspace_id, integration_id, creds)
+                    log_info(f"[Resolver] Token successfully refreshed and saved for {integration_id}")
+                    return (
+                        "CONNECTED",
+                        f"{provider_or_tool} is connected and ready.",
+                        {"integration_id": integration_id, "workspace_id": workspace_id, "token_state": "refreshed"}
+                    )
+            except GoogleOAuthRefreshError as oauth_err:
+                log_error(f"[Resolver] Permanent OAuth failure for {integration_id}: {oauth_err.code}")
+                return (
+                    "TOKEN_REFRESH_FAILED",
+                    "Google Calendar authorization needs to be reconnected. The stored OAuth connection is no longer valid "
+                    f"({oauth_err.code}).",
+                    {"integration_id": integration_id, "error_code": oauth_err.code}
+                )
+            except Exception as ref_err:
+                log_error(f"[Resolver] Automatic token refresh failed for {integration_id}", exc=ref_err)
+                return (
+                    "TOKEN_REFRESH_FAILED",
+                    "Google Calendar authorization needs to be refreshed.",
+                    {"integration_id": integration_id, "error": str(ref_err)}
+                )
+
+            return (
+                "TOKEN_REFRESH_FAILED",
+                "Google Calendar authorization needs to be refreshed.",
+                {"integration_id": integration_id}
+            )
