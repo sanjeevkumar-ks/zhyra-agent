@@ -12,6 +12,8 @@ class ContextConfig(BaseModel):
     total_context_budget: int = Field(default=8000, description="Total target context budget limit")
     similarity_threshold: float = Field(default=0.6, description="Similarity threshold for RAG and memory retrieval")
     compress_rag: bool = Field(default=True, description="Enable sentence-level text compression on RAG chunks")
+    rag_enabled: bool = Field(default=True, description="Set False to skip RAG retrieval entirely (e.g. action/tool requests)")
+    enable_fallback_mock_rag: bool = Field(default=False, description="Never fabricate RAG content when nothing was retrieved")
 
 class ContextBudget(BaseModel):
     total_context_budget: int

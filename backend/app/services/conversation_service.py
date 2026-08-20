@@ -287,6 +287,7 @@ class ConversationService:
             "blocks": ai_reply.get("blocks", []),
             "execution_status": ai_reply.get("execution_status", "completed"),
             "integration_used": ai_reply.get("integration_used"),
+            "action_state": ai_reply.get("action_state", []),
             "timings": timings,
         }
         yield f"__METADATA__:{json.dumps(meta_payload)}\n"
@@ -321,6 +322,7 @@ class ConversationService:
             "status": ai_reply.get("status", convo_data.get("status", "active")),
             "integration_used": ai_reply.get("integration_used"),
             "execution_status": ai_reply.get("execution_status", "completed"),
+            "action_state": ai_reply.get("action_state", []),
             "mode": mode,
         })
 
@@ -344,6 +346,7 @@ class ConversationService:
                 "timings": ai_reply.get("timings") or {},
                 "knowledge_used": ai_reply.get("knowledge_used", [])[:10],
                 "actions": ai_reply.get("actions", [])[:20],
+                "action_state": ai_reply.get("action_state", []),
                 "tool_events": [
                     {k: v for k, v in e.items() if k not in ("args", "data")}
                     for e in (ai_reply.get("tool_events") or [])
@@ -509,6 +512,7 @@ class ConversationService:
         text: str,
         tool_records: List[dict] = None,
         tool_result: dict = None,
+        query: str = "",
     ) -> str:
         """
         Verification gate: an LLM-generated success claim is never shown to the
@@ -516,11 +520,26 @@ class ConversationService:
         verifiable success signal (SUCCEEDED record with a resource ID for
         create/send actions). This prevents the model from "hallucinating"
         completed actions.
+
+        Two layers:
+          1. Structural gate (primary): when the user's query is an action
+             request and NO verified (non-simulated) tool record backs it up,
+             ANY success-claiming phrasing is replaced with an honest refusal —
+             regardless of how the model worded it.
+          2. Keyword gate (fallback): catches success claims on non-action
+             queries too.
         """
+        from app.ai.gate import enforce_action_gate, is_action_request, asserts_success
+
         text = text or ""
         records = tool_records or []
         result = tool_result or {}
 
+        # Layer 1: structural gate for action requests.
+        if is_action_request(query):
+            return enforce_action_gate(text, query, records, result)
+
+        # Layer 2: keyword-based gate for everything else.
         verified = any(r.get("status") == "SUCCEEDED" for r in records)
         if not records and result.get("success") is True:
             verified = True
@@ -540,6 +559,12 @@ class ConversationService:
             return ("I wasn't able to complete that action for you yet — "
                     "let me know if you'd like me to try again.")
         return text
+
+    @staticmethod
+    def build_action_state(tool_records: List[dict] = None) -> List[dict]:
+        """Structured action-state metadata for the final response (Requirement 31)."""
+        from app.ai.gate import build_action_state
+        return build_action_state(tool_records)
 
     @staticmethod
     def _parse_tool_call(text: str) -> Optional[dict]:

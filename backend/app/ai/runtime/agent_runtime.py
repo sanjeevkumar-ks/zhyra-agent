@@ -119,6 +119,7 @@ class AgentRuntime:
             "context_packet": None,
             "trace_id": trace_id,
             "mode": mode,
+            "action_state": [],
             "timings": {
                 "agent_loading_ms": int((time.time() - t0) * 1000),
             },
@@ -140,7 +141,8 @@ class AgentRuntime:
                 message=raw_msg,
                 tool_call=final_state.get("tool_call"),
                 tool_result=final_state.get("tool_result"),
-                tool_records=final_state.get("tool_records") or []
+                tool_records=final_state.get("tool_records") or [],
+                query=query,
             )
             timings = dict(final_state.get("timings") or {})
             timings["final_response_ms"] = int((time.time() - t_format) * 1000)
@@ -155,6 +157,7 @@ class AgentRuntime:
             res_dict["memory_recalled"] = ["Prefers concise responses"] if "concise" in final_state.get("system_prompt", "").lower() else []
             res_dict["actions"] = final_state.get("actions", [])
             res_dict["status"] = final_state.get("status", "active")
+            res_dict["action_state"] = final_state.get("action_state", [])
             res_dict["trace_id"] = trace_id
             res_dict["mode"] = mode
             res_dict["timings"] = timings

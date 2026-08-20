@@ -34,6 +34,7 @@ class AgentState(TypedDict):
     trace_id: str
     mode: str
     timings: Dict[str, Any]
+    action_state: List[Dict[str, Any]]
     # Workflow Execution State
     workflow_id: Optional[str]
     workflow_nodes: List[Dict[str, Any]]
@@ -50,6 +51,7 @@ async def retrieve_context_node(state: AgentState) -> Dict[str, Any]:
     import time
     from app.ai.context.engine import ContextEngine
     from app.ai.integration.dynamic_registry import DynamicToolRegistry
+    from app.ai.gate import is_action_request
 
     t_start = time.time()
 
@@ -62,12 +64,19 @@ async def retrieve_context_node(state: AgentState) -> Dict[str, Any]:
         agent_tools=agent_tools
     )
 
+    # Action requests do NOT need RAG. A "schedule a calendar event" query must
+    # not load unrelated knowledge PDFs (e.g. a resume) — tool execution is the
+    # source of truth. Skipping retrieval avoids the embedding call, the vector
+    # search, and a bloated LLM prompt (major latency + hallucination driver).
+    skip_retrieval = is_action_request(state["user_query"])
+    config_override = {"rag_enabled": not skip_retrieval}
     packet = await ContextEngine.build(
         workspace_id=state["workspace_id"],
         agent_id=state["agent_id"],
         agent_data=state["agent_data"],
         query=state["user_query"],
-        history=state["history"]
+        history=state["history"],
+        config_override=config_override
     )
 
     # Prepend dynamic tool prompt
@@ -79,6 +88,13 @@ async def retrieve_context_node(state: AgentState) -> Dict[str, Any]:
 
     timings = dict(state.get("timings") or {})
     timings["tools_loading_ms"] = int((time.time() - t_start) * 1000)
+
+    if skip_retrieval:
+        log_info(
+            f"[Context] Skipping RAG retrieval for action request "
+            f"agent_id={state['agent_id']} workspace_id={state['workspace_id']} "
+            f"ready_tools={len(ready_ids)}"
+        )
 
     return {
         "context": packet.rag_context,
@@ -162,6 +178,15 @@ async def generate_response_node(state: AgentState) -> Dict[str, Any]:
 
     from app.ai.integration.dynamic_registry import DynamicToolRegistry
     functions_schema = DynamicToolRegistry.get_tool_schemas(ready_ids) if ready_ids else None
+
+    # Tool-binding verification (Requirement 3): log exactly what the LLM
+    # instance receives so a tool binding break is visible in the logs.
+    bound_tools = [s.get("name", "") for s in (functions_schema or [])]
+    log_info(
+        f"[Tool Binding] agent_id={state['agent_id']} workspace_id={state['workspace_id']} "
+        f"mode={state.get('mode') or 'live'} tool_count={len(bound_tools)} "
+        f"tool_names={bound_tools}"
+    )
 
     structured = await ProviderManager.generate_structured(
         workspace_id=state["workspace_id"],
@@ -356,12 +381,18 @@ async def finalize_node(state: AgentState) -> Dict[str, Any]:
     from app.services.conversation_service import ConversationService
     ai_text = ConversationService.sanitize_tool_call_text(state.get("ai_text", ""))
 
-    # Verification gate: never pass through a success claim without a verified result.
+    # Verification gate: never pass through a success claim without a verified
+    # result. The query is passed so the structural action gate applies even
+    # when the model phrases its success claim in an unexpected way.
     ai_text = ConversationService._enforce_verification_gate(
         ai_text,
         tool_records=state.get("tool_records") or [],
         tool_result=state.get("tool_result"),
+        query=state.get("user_query", ""),
     )
+
+    # Structured action state for the frontend (Requirement 31).
+    action_state = ConversationService.build_action_state(state.get("tool_records") or [])
 
     # Query lower for classification
     query_lower = state["user_query"].lower()
@@ -379,7 +410,7 @@ async def finalize_node(state: AgentState) -> Dict[str, Any]:
     elif "product" in query_lower or "inventory" in query_lower or "order" in query_lower or "shipping" in query_lower:
         intent = "Shopify Order / Commerce"
 
-    return {"ai_text": ai_text, "intent": intent, "status": status}
+    return {"ai_text": ai_text, "intent": intent, "status": status, "action_state": action_state}
 
 
 def should_execute_tool(state: AgentState) -> str:
@@ -481,6 +512,14 @@ def build_agent_graph() -> StateGraph:
 
     # Setup routing helper based on workflow status
     def route_start(state: AgentState) -> str:
+        from app.ai.gate import is_action_request
+        # Direct action/tool requests ALWAYS take the standard tool path so the
+        # request is handled by the real tool pipeline. An unrelated workflow
+        # (e.g. "User Signup -> Send Welcome Email") must not hijack
+        # "schedule a calendar event" and inject its own tool results into the
+        # response gate (which could validate an unrelated success claim).
+        if is_action_request(state.get("user_query", "")):
+            return "retrieve_context"
         if state.get("workflow_id") and state.get("current_node_id"):
             return "workflow_step"
         return "retrieve_context"

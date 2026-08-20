@@ -10,7 +10,8 @@ class ResponseFormatter:
         tool_call: Optional[Dict[str, Any]] = None,
         tool_result: Optional[Dict[str, Any]] = None,
         status: str = "success",
-        tool_records: List[Dict[str, Any]] = None
+        tool_records: List[Dict[str, Any]] = None,
+        query: str = "",
     ) -> StructuredAgentResponse:
         """
         Formats final LLM agent response and tool execution outcome 
@@ -26,7 +27,7 @@ class ResponseFormatter:
 
         message = ConversationService.sanitize_tool_call_text(message or "")
         message = ConversationService._enforce_verification_gate(
-            message, tool_records=tool_records, tool_result=tool_result
+            message, tool_records=tool_records, tool_result=tool_result, query=query
         )
 
         blocks: List[ResponseBlock] = []

@@ -13,5 +13,105 @@
     }
   },
   "integration_credentials": {},
-  "integrations": {}
+  "integrations": {},
+  "workspaces": {
+    "ws_usr_admin_": {
+      "id": "ws_usr_admin_",
+      "name": "Mock User (usr_admin_test)'s Workspace",
+      "owner_id": "usr_admin_test",
+      "industry": "Technology",
+      "timezone": "UTC",
+      "language": "English (US)",
+      "default_provider": "gemini",
+      "default_model": "gemini-3.5-flash",
+      "temperature": 0.7,
+      "max_output_tokens": 1000,
+      "streaming_enabled": true
+    }
+  },
+  "users": {
+    "usr_admin_test": {
+      "uid": "usr_admin_test",
+      "email": "usr_admin_test@example.com",
+      "name": "Mock User (usr_admin_test)",
+      "avatar_url": "https://lh3.googleusercontent.com/a/mock-avatar",
+      "workspace_id": "ws_usr_admin_",
+      "onboarded": false
+    }
+  },
+  "plans": {
+    "ws_usr_admin_": {
+      "name": "Scale Plan (Trial)",
+      "status": "active",
+      "price_monthly": 0.0,
+      "renews_date": "N/A",
+      "conversations_included": 1000,
+      "conversations_used": 0
+    }
+  },
+  "settings": {
+    "ai_providers_ws_usr_admin_": {
+      "gemini": {
+        "connected": false,
+        "api_key": ""
+      },
+      "openai": {
+        "connected": false,
+        "api_key": ""
+      },
+      "claude": {
+        "connected": false,
+        "api_key": ""
+      },
+      "openrouter": {
+        "connected": false,
+        "api_key": ""
+      }
+    }
+  },
+  "team": {
+    "team_member_1_ws_usr_admin_": {
+      "id": "team_member_1_ws_usr_admin_",
+      "workspace_id": "ws_usr_admin_",
+      "name": "Mock User (usr_admin_test)",
+      "email": "usr_admin_test@example.com",
+      "role": "Workspace Creator",
+      "permission": "Owner",
+      "initials": "M",
+      "gradient": "from-[#2F6BFF] to-[#8B7CF6]",
+      "lastActive": "Just now"
+    }
+  },
+  "memories": {
+    "mem_1_ws_usr_admin_": {
+      "id": "mem_1_ws_usr_admin_",
+      "workspace_id": "ws_usr_admin_",
+      "title": "Customer #4021 Billing Issue",
+      "detail": "Elena corrected invoice pricing margin overrides for clinical consultations.",
+      "type": "long-term",
+      "time": "2h ago",
+      "agent": "Tara",
+      "protected": true
+    },
+    "mem_2_ws_usr_admin_": {
+      "id": "mem_2_ws_usr_admin_",
+      "workspace_id": "ws_usr_admin_",
+      "title": "Customer Preference",
+      "detail": "Patient prefers SMS reminders instead of direct telephone calls.",
+      "type": "preference",
+      "time": "1d ago",
+      "agent": "Kayal",
+      "protected": false
+    },
+    "mem_3_ws_usr_admin_": {
+      "id": "mem_3_ws_usr_admin_",
+      "workspace_id": "ws_usr_admin_",
+      "title": "Temporary Session State",
+      "detail": "Checked inventory levels for flu vaccination supplies.",
+      "type": "short-term",
+      "time": "2d ago",
+      "agent": "Mitran",
+      "protected": false
+    }
+  }
 }
