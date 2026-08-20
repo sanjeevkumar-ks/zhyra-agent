@@ -222,7 +222,8 @@ export default function Testing() {
 
     try {
       let convo = activeConvo;
-      if (!convo) {
+      const existingCid = convo?.conversation_id || convo?.session_id || convo?.id;
+      if (!existingCid || existingCid === "undefined") {
         convo = await apiClient.post<any>("/api/playground/session", {
           agent_id: agentId,
           mode,
@@ -230,9 +231,14 @@ export default function Testing() {
         setActiveConvo(convo);
       }
 
+      const cid = convo?.conversation_id || convo?.session_id || convo?.id;
+      if (!cid || cid === "undefined") {
+        throw new Error("Failed to resolve valid session ID.");
+      }
+
       let accumulated = "";
       await apiClient.stream(
-        `/api/playground/session/${convo.conversation_id}/stream?prompt_text=${encodeURIComponent(prompt)}&mode=${mode}`,
+        `/api/playground/session/${cid}/stream?prompt_text=${encodeURIComponent(prompt)}&mode=${mode}`,
         (chunk) => {
           accumulated += chunk;
           setMessages((prev) => prev.map((m) => (m.id === agentMsgId ? { ...m, content: accumulated } : m)));
@@ -267,7 +273,7 @@ export default function Testing() {
         }
       );
 
-      const finalConvo = await apiClient.get<any>(`/api/playground/session/${convo.conversation_id}`);
+      const finalConvo = await apiClient.get<any>(`/api/playground/session/${cid}`);
       setActiveConvo(finalConvo);
       const lastMsg = finalConvo.messages?.[finalConvo.messages.length - 1];
       setMessages((prev) =>

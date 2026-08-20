@@ -121,6 +121,8 @@ async def get_playground_session(
     workspace_id: str = Depends(get_user_workspace_id),
 ):
     """Fetches the full test session (conversation) transcript."""
+    if not convo_id or convo_id.lower() in ("undefined", "null", "none"):
+        raise HTTPException(status_code=400, detail="Invalid session_id parameter.")
     return await ConversationService.get_conversation(workspace_id, convo_id)
 
 
@@ -138,6 +140,8 @@ async def stream_playground_session(
     conversations. The only difference is the explicit mode flag and the
     validated, workspace-scoped session context.
     """
+    if not convo_id or convo_id.lower() in ("undefined", "null", "none"):
+        raise HTTPException(status_code=400, detail="Invalid session_id parameter.")
     mode = mode.lower()
     if mode not in MODES:
         raise HTTPException(status_code=400, detail="mode must be 'live' or 'simulation'.")
