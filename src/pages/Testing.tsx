@@ -134,6 +134,8 @@ export default function Testing() {
   const [liveStatus, setLiveStatus] = useState<string>("");
   const [runTrace, setRunTrace] = useState<PlaygroundEvent[]>([]);
   const [runTimings, setRunTimings] = useState<Record<string, number> | null>(null);
+  const [runStatus, setRunStatus] = useState<"thinking" | "tool" | "completed" | "failed" | "timeout" | "reauth" | null>(null);
+  const [reauthMsg, setReauthMsg] = useState<string | null>(null);
   const [traceOpen, setTraceOpen] = useState(false);
   const [integrations, setIntegrations] = useState<IntegrationStatus[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -207,6 +209,11 @@ export default function Testing() {
     }
   };
 
+  const handleReconnectCalendar = () => {
+    const cal = integrations.find((i) => i.integration_id === "int_gcal") || integrations[0];
+    if (cal) handleReconnect(cal);
+  };
+
   const handleSend = async (text?: string) => {
     const prompt = (text ?? input).trim();
     if (!prompt || !agentId || loading) return;
@@ -219,6 +226,9 @@ export default function Testing() {
     setLiveStatus("Running the real agent…");
     setRunTrace([]);
     setRunTimings(null);
+    setRunStatus("thinking");
+    setReauthMsg(null);
+    let terminal: { type: string; message?: string; error_code?: string } | null = null;
 
     try {
       let convo = activeConvo;
@@ -237,52 +247,85 @@ export default function Testing() {
       }
 
       let accumulated = "";
-      await apiClient.stream(
-        `/api/playground/session/${cid}/stream?prompt_text=${encodeURIComponent(prompt)}&mode=${mode}`,
-        (chunk) => {
-          accumulated += chunk;
-          setMessages((prev) => prev.map((m) => (m.id === agentMsgId ? { ...m, content: accumulated } : m)));
-        },
-        (meta) => {
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.id === agentMsgId
-                ? { ...m, blocks: meta.blocks || [], streaming: false }
-                : m
-            )
-          );
-        },
-        (event: PlaygroundEvent) => {
-          setRunTrace((prev) => [...prev, event]);
-          if (event.type === "tool_started") {
-            const toolName = event.tool || "";
-            const action = event.action || "";
-            setLiveStatus(`${toolName} ${action}…`);
-          } else if (event.type === "tool_completed") {
-            setLiveStatus(event.simulated ? "Simulated tool run completed" : "Tool completed");
-          } else if (event.type === "tool_failed") {
-            setLiveStatus("Tool failed");
-          } else if (event.type === "assistant_message") {
-            setLiveStatus("");
-          } else if (event.type === "timing") {
-            setRunTimings(event.timings || null);
+      const CLIENT_TIMEOUT_MS = 150000;
+      await Promise.race([
+        apiClient.stream(
+          `/api/playground/session/${cid}/stream?prompt_text=${encodeURIComponent(prompt)}&mode=${mode}`,
+          (chunk) => {
+            accumulated += chunk;
+            setMessages((prev) => prev.map((m) => (m.id === agentMsgId ? { ...m, content: accumulated } : m)));
+          },
+          (meta) => {
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === agentMsgId
+                  ? { ...m, blocks: meta.blocks || [], streaming: false }
+                  : m
+              )
+            );
+          },
+          (event: PlaygroundEvent) => {
+            setRunTrace((prev) => [...prev, event]);
+            if (event.type === "heartbeat") {
+              if (!liveStatus) setLiveStatus("Still thinking…");
+            } else if (event.type === "assistant_status") {
+              if (event.status === "thinking") setLiveStatus("Thinking…");
+            } else if (event.type === "tool_started") {
+              const toolName = event.tool || "";
+              const action = event.action || "";
+              setRunStatus("tool");
+              setLiveStatus(`${toolName} ${action}…`);
+            } else if (event.type === "tool_completed") {
+              setLiveStatus(event.simulated ? "Simulated tool run completed" : "Tool completed");
+            } else if (event.type === "tool_failed") {
+              setLiveStatus("Tool failed");
+            } else if (event.type === "assistant_message") {
+              setLiveStatus("");
+            } else if (event.type === "timing") {
+              setRunTimings(event.timings || null);
+            } else if (event.type === "run_completed") {
+              setRunStatus("completed");
+              setLiveStatus("");
+              terminal = { type: event.type };
+            } else if (event.type === "run_failed") {
+              setRunStatus("failed");
+              terminal = { type: event.type, message: event.message, error_code: event.error_code };
+              setLiveStatus(event.message || "The agent couldn't complete the request.");
+            } else if (event.type === "run_timeout") {
+              setRunStatus("timeout");
+              terminal = { type: event.type, message: event.message, error_code: event.error_code };
+              setLiveStatus("The agent took too long to respond.");
+            } else if (event.type === "reauth_required") {
+              setRunStatus("reauth");
+              setReauthMsg(event.message || "Google Calendar needs to be reconnected before I can schedule this.");
+              terminal = { type: event.type, message: event.message };
+              setLiveStatus("");
+            }
+          },
+          (ack) => {
+            if (ack?.status === "processing") setLiveStatus("Agent started…");
           }
-        },
-        (ack) => {
-          if (ack?.status === "processing") setLiveStatus("Agent started…");
-        }
-      );
+        ),
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error("CLIENT_TIMEOUT")), CLIENT_TIMEOUT_MS)
+        ),
+      ]);
 
       const finalConvo = await apiClient.get<any>(`/api/playground/session/${cid}`);
       setActiveConvo(finalConvo);
       const lastMsg = finalConvo.messages?.[finalConvo.messages.length - 1];
+      const tinfo = terminal as { type: string; message?: string; error_code?: string } | null;
+      const fallbackText = tinfo?.message
+        || (tinfo?.type === "run_timeout" ? "The agent took too long to respond. Please try again."
+          : tinfo?.type === "reauth_required" ? "Google Calendar needs to be reconnected before I can schedule this."
+          : "");
       setMessages((prev) =>
         prev.map((m) =>
           m.id === agentMsgId
             ? {
                 ...m,
                 streaming: false,
-                content: lastMsg?.text || accumulated,
+                content: lastMsg?.text || accumulated || fallbackText,
                 blocks: lastMsg?.blocks || [],
                 meta: {
                   confidence: finalConvo.confidence,
@@ -299,10 +342,22 @@ export default function Testing() {
       // now visible immediately without a server restart.
       loadConnectionStatus(agentId);
     } catch (err) {
+      const isTimeout = (err as Error)?.message === "CLIENT_TIMEOUT";
+      const tinfo = terminal as { type: string; message?: string; error_code?: string } | null;
+      const fallback = tinfo?.message
+        || (isTimeout ? "The agent took too long to respond. Please try again."
+          : "Something interrupted this test before the agent completed.");
+      if (isTimeout) {
+        setRunStatus("timeout");
+        terminal = { type: "run_timeout", message: fallback };
+      } else if (!tinfo) {
+        setRunStatus("failed");
+        terminal = { type: "run_failed", message: fallback };
+      }
       setMessages((prev) =>
         prev.map((m) =>
           m.id === agentMsgId
-            ? { ...m, streaming: false, content: m.content || "Something went wrong generating a response." }
+            ? { ...m, streaming: false, content: m.content || fallback }
             : m
         )
       );
@@ -590,6 +645,31 @@ export default function Testing() {
                 {lastToolEvent?.type === "tool_started" && <TypingDots />}
               </div>
             )}
+
+            {/* Terminal outcomes — never an empty/ambiguous end state */}
+            {!loading && runStatus === "timeout" && (
+              <div className="ml-9 flex flex-wrap items-center gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[12.5px] text-amber-600">
+                <Clock size={14} />
+                <span>The agent took too long to respond. Please try again.</span>
+                <button onClick={handleRetry} className="font-semibold underline">Retry</button>
+              </div>
+            )}
+            {!loading && runStatus === "failed" && (
+              <div className="ml-9 flex flex-wrap items-center gap-2 rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-[12.5px] text-rose-600">
+                <AlertTriangle size={14} />
+                <span>Zhyra couldn't complete this request right now.</span>
+                <button onClick={handleRetry} className="font-semibold underline">Retry</button>
+              </div>
+            )}
+            {!loading && runStatus === "reauth" && (
+              <div className="ml-9 flex flex-wrap items-center gap-2 rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-[12.5px] text-rose-600">
+                <ExternalLink size={14} />
+                <span>{reauthMsg || "Google Calendar needs to be reconnected before I can schedule this."}</span>
+                <button onClick={handleReconnectCalendar} className="font-semibold underline">
+                  Reconnect Google Calendar
+                </button>
+              </div>
+            )}
           </div>
 
           <div className="min-w-0 border-t border-line pt-3">
@@ -719,6 +799,33 @@ export default function Testing() {
                         {e.type === "timing" && (
                           <span className="flex items-center gap-1.5 text-ink-faint">
                             <Gauge size={13} /> total {e.timings?.total_ms ?? "?"}ms
+                          </span>
+                        )}
+                        {e.type === "run_completed" && (
+                          <span className="flex items-center gap-1.5 text-ink-soft">
+                            <CheckCircle2 size={13} className="text-emerald-500" /> Terminal: COMPLETED
+                          </span>
+                        )}
+                        {e.type === "run_failed" && (
+                          <span className="flex items-center gap-1.5 text-rose-500">
+                            <XCircle size={13} /> Terminal: FAILED
+                            {e.error_code && <Badge tone="rose">{e.error_code}</Badge>}
+                          </span>
+                        )}
+                        {e.type === "run_timeout" && (
+                          <span className="flex items-center gap-1.5 text-amber-500">
+                            <Clock size={13} /> Terminal: TIMED OUT
+                            {e.error_code && <Badge tone="amber">{e.error_code}</Badge>}
+                          </span>
+                        )}
+                        {e.type === "reauth_required" && (
+                          <span className="flex items-center gap-1.5 text-rose-500">
+                            <ExternalLink size={13} /> Terminal: REAUTH REQUIRED
+                          </span>
+                        )}
+                        {e.type === "heartbeat" && (
+                          <span className="flex items-center gap-1.5 text-ink-faint">
+                            <Clock size={11} /> keepalive
                           </span>
                         )}
                       </div>

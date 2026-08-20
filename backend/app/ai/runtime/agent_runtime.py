@@ -15,7 +15,8 @@ class AgentRuntime:
         conversation_id: str = "unknown_convo",
         user_id: str = "unknown_user",
         trace_id: str = None,
-        mode: str = "live"
+        mode: str = "live",
+        timeout_seconds: int = 150,
     ) -> dict:
         """
         Loads Agent, resolves Workflow, runs the LangGraph agent state graph, 
@@ -25,6 +26,11 @@ class AgentRuntime:
           - ``"live"`` (default) — full real execution, same as production.
           - ``"simulation"``     — real agent, real tools, real connection
                                    resolution, but NO external API calls.
+
+        Every execution terminates with exactly one deterministic terminal
+        outcome. The result dict always includes ``terminal_state`` in
+        COMPLETED | FAILED | REAUTH_REQUIRED | TIMED_OUT and a non-empty
+        ``text``.
         """
         import uuid
         t0 = time.time()
@@ -61,7 +67,15 @@ class AgentRuntime:
                 pass
 
         if not agent_data:
-            return {"text": "I apologize, but I could not locate my agent settings.", "intent": "Error", "message": "Settings missing", "blocks": []}
+            return {
+                "text": "I apologize, but I could not locate my agent settings.",
+                "intent": "Error",
+                "message": "Settings missing",
+                "blocks": [],
+                "terminal_state": "FAILED",
+                "execution_status": "failed",
+                "error_code": "AGENT_NOT_FOUND",
+            }
 
         # 2. Resolve Workflow
         workflow_id = agent_data.get("workflow_id")
@@ -120,6 +134,10 @@ class AgentRuntime:
             "trace_id": trace_id,
             "mode": mode,
             "action_state": [],
+            "empty_response": False,
+            "generation_error": "",
+            "llm_attempts": 0,
+            "execution_status": "completed",
             "timings": {
                 "agent_loading_ms": int((time.time() - t0) * 1000),
             },
@@ -129,10 +147,38 @@ class AgentRuntime:
             "current_node_id": current_node_id
         }
 
-        # 4. Invoke LangGraph Graph
+        # 4. Invoke LangGraph Graph with an explicit overall timeout. A hung or
+        #    excessively slow execution must terminate deterministically as
+        #    TIMED_OUT — never leave the stream waiting indefinitely.
+        import asyncio
         try:
-            final_state = await compiled_agent_graph.ainvoke(initial_state)
-            
+            try:
+                final_state = await asyncio.wait_for(
+                    compiled_agent_graph.ainvoke(initial_state),
+                    timeout=timeout_seconds,
+                )
+            except asyncio.TimeoutError:
+                log_error(f"[Runtime][{trace_id}] agent execution timed out after {timeout_seconds}s")
+                msg = "The agent took too long to respond. Please try again."
+                return {
+                    "text": msg,
+                    "message": msg,
+                    "blocks": [{"type": "text", "data": {"text": msg}}],
+                    "intent": "Error",
+                    "confidence": 0,
+                    "knowledge_used": [],
+                    "memory_recalled": [],
+                    "actions": [],
+                    "status": "active",
+                    "trace_id": trace_id,
+                    "tool_events": [],
+                    "action_state": [],
+                    "terminal_state": "TIMED_OUT",
+                    "execution_status": "timed_out",
+                    "error_code": "AGENT_TIMEOUT",
+                    "timings": {"total_ms": int((time.time() - t0) * 1000)},
+                }
+
             raw_msg = final_state.get("ai_text") or ""
             # Format output using ResponseFormatter to get structured blocks
             from app.ai.response.response_formatter import ResponseFormatter
@@ -150,7 +196,11 @@ class AgentRuntime:
 
             res_dict = structured.model_dump()
             # Maintain backward compatibility fields
-            res_dict["text"] = res_dict.get("message") or raw_msg or ""
+            text = res_dict.get("message") or raw_msg or ""
+            if not text.strip():
+                # Absolute final safety net: no execution may end silent.
+                text = "I wasn't able to generate a response. Please try again."
+            res_dict["text"] = text
             res_dict["intent"] = final_state.get("intent", "Inquire details")
             res_dict["confidence"] = final_state.get("confidence", 95)
             res_dict["knowledge_used"] = final_state.get("cited_sources", [])
@@ -162,9 +212,35 @@ class AgentRuntime:
             res_dict["mode"] = mode
             res_dict["timings"] = timings
 
+            # --- Deterministic terminal state (exactly one per execution) ---
+            records = final_state.get("tool_records") or []
+            reauth_codes = ("REAUTH_REQUIRED", "TOKEN_EXPIRED", "TOKEN_REFRESH_FAILED")
+            has_reauth = any(
+                r.get("status") == "FAILED" and r.get("error_code") in reauth_codes for r in records
+            )
+            has_failed_tool = any(r.get("status") == "FAILED" for r in records)
+            execution_status = final_state.get("execution_status", "completed")
+
+            if has_reauth:
+                terminal_state = "REAUTH_REQUIRED"
+                execution_status = "reauth_required"
+                error_code = "REAUTH_REQUIRED"
+            elif execution_status == "failed" or has_failed_tool:
+                terminal_state = "FAILED"
+                execution_status = "failed"
+                error_code = final_state.get("generation_error") or "AGENT_ERROR"
+            else:
+                terminal_state = "COMPLETED"
+                execution_status = "completed"
+                error_code = ""
+
+            res_dict["terminal_state"] = terminal_state
+            res_dict["execution_status"] = execution_status
+            res_dict["error_code"] = error_code
+
             # Tool lifecycle events for the streaming protocol
             tool_events = []
-            for rec in (final_state.get("tool_records") or []):
+            for rec in records:
                 status = rec.get("status")
                 event_type = {
                     "PENDING": "tool_started",
@@ -186,11 +262,15 @@ class AgentRuntime:
                 })
             res_dict["tool_events"] = tool_events
 
-            log_info(f"[Runtime][{trace_id}] completed in status={final_state.get('status')} tool_calls={len(final_state.get('tool_records') or [])}")
+            log_info(f"[Runtime][{trace_id}] completed terminal={terminal_state} status={execution_status} tool_calls={len(records)}")
             return res_dict
         except Exception as e:
             log_error(f"LangGraph runtime execution failed for agent {agent_id}", exc=e)
-            err_msg = f"I encountered an issue processing your request: {str(e)}"
+            err_text = str(e) or ""
+            provider_markers = ("gemini", "openai", "anthropic", "claude", "nvidia", "openrouter",
+                                "api returned status", "rate limit", "quota", "429", "timeout")
+            error_code = "LLM_PROVIDER_ERROR" if any(m in err_text.lower() for m in provider_markers) else "AGENT_RUNTIME_ERROR"
+            err_msg = "Zhyra couldn't complete this request right now. Please try again."
             return {
                 "text": err_msg,
                 "message": err_msg,
@@ -202,7 +282,12 @@ class AgentRuntime:
                 "actions": [],
                 "status": "active",
                 "trace_id": trace_id,
-                "tool_events": []
+                "tool_events": [],
+                "action_state": [],
+                "terminal_state": "FAILED",
+                "execution_status": "failed",
+                "error_code": error_code,
+                "timings": {"total_ms": int((time.time() - t0) * 1000)},
             }
 
     @staticmethod

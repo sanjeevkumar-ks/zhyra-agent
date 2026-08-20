@@ -195,6 +195,28 @@ class GeminiProvider(LLMProvider):
                     raise Exception(f"Gemini API returned status {res.status_code}: {res.text}")
 
                 data = res.json()
+                candidates = data.get("candidates") or []
+                if not candidates:
+                    # Blocked response (safety) or no candidates at all. NEVER a
+                    # silent empty result: surface why the turn produced nothing.
+                    finish_reason = "EMPTY_CANDIDATES"
+                    block_reason = (data.get("promptFeedback") or {}).get("blockReason", "")
+                    if block_reason:
+                        finish_reason = f"BLOCKED:{block_reason}"
+                    log_info(
+                        f"[Gemini Provider] empty/blocked structured response "
+                        f"model={model} finish_reason={finish_reason} candidates=0"
+                    )
+                    return StructuredLLMResponse(
+                        text="",
+                        tool_calls=[],
+                        model=model,
+                        provider=self.name,
+                        finish_reason=finish_reason,
+                        provider_error=f"The model returned an empty response (finish_reason={finish_reason}).",
+                    )
+
+                finish_reason = (candidates[0].get("finishReason") or "STOP") if candidates else ""
                 parts = self._extract_parts(data)
                 calls = self._parts_to_function_calls(parts)
                 text = self._parts_to_text(parts)
@@ -228,6 +250,7 @@ class GeminiProvider(LLMProvider):
                     model=model,
                     provider=self.name,
                     latency_ms=latency_ms,
+                    finish_reason=finish_reason,
                 )
         except Exception as e:
             log_error("Gemini structured generation failed", exc=e)

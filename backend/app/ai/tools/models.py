@@ -69,7 +69,13 @@ class ToolExecutionRecord(BaseModel):
 
 
 class StructuredLLMResponse(BaseModel):
-    """Result of a single LLM turn: either free text, tool calls, or both."""
+    """Result of a single LLM turn: either free text, tool calls, or both.
+
+    Reliability contract: a turn is NEVER silently empty. ``empty`` is set True
+    only when the provider returned no text AND no tool calls (e.g. a blocked /
+    safety / max-token response). Callers must treat ``empty`` as a handled
+    condition, never as a silent completion.
+    """
 
     text: str = ""
     tool_calls: List[ToolCall] = Field(default_factory=list)
@@ -78,3 +84,16 @@ class StructuredLLMResponse(BaseModel):
     latency_ms: int = 0
     model: str = ""
     provider: str = ""
+    finish_reason: str = ""          # STOP | MAX_TOKENS | SAFETY | RECITATION | EMPTY_CANDIDATES | ""
+    content_length: int = 0
+    tool_call_count: int = 0
+    empty: bool = False              # True iff text == "" and tool_calls == []
+    provider_error: str = ""         # safe, user-visible message if the provider failed/blocked
+
+    def _compute_flags(self) -> None:
+        self.content_length = len(self.text or "")
+        self.tool_call_count = len(self.tool_calls or [])
+        self.empty = not (self.text or "").strip() and not self.tool_calls
+
+    def model_post_init(self, __context) -> None:
+        self._compute_flags()

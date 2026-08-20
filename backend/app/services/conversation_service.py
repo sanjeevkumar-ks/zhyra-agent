@@ -1,6 +1,7 @@
 import time
 import json
 import uuid
+import asyncio
 from typing import AsyncGenerator, Dict, Any, List, Optional
 from fastapi import HTTPException
 from app.database.firestore import firestore_client
@@ -199,13 +200,20 @@ class ConversationService:
         workspace_id: str,
         convo_id: str,
         text: str,
-        mode: str = "live"
+        mode: str = "live",
+        heartbeat_interval: float = 10.0,
+        stream_timeout: float = 180.0,
     ) -> AsyncGenerator[str, None]:
         """Streams AI chunks to support SSE responses with structured tool events.
 
         ``mode`` selects live (real external actions) or simulation (no external
         calls). Both modes run the SAME AgentRuntime — only the tool executor
         short-circuits in simulation mode.
+
+        Reliability contract: every run emits EXACTLY ONE terminal event
+        (``run_completed`` | ``run_failed`` | ``run_timeout`` | ``reauth_required``)
+        before the generator closes, and NEVER a silent empty assistant message.
+        Heartbeats keep the SSE connection alive during long LLM/tool waits.
         """
         convo_ref = firestore_client.collection("conversations").document(convo_id)
         convo_snap = convo_ref.get()
@@ -257,77 +265,153 @@ class ConversationService:
         cls._log_analytics_event(workspace_id, "message_sent")
 
         # 4. Invoke the LangGraph AI Runtime orchestration layer (same runtime
-        #    used by production conversations and the widget).
+        #    used by production conversations and the widget). The execution
+        #    runs in a background task so the SSE connection stays alive with
+        #    heartbeats during long LLM/tool waits, and so a client disconnect
+        #    cleanly cancels the run (no orphaned background execution).
         from app.ai.runtime.agent_runtime import AgentRuntime
 
-        ai_reply = await AgentRuntime.execute(
-            workspace_id=workspace_id,
-            agent_id=agent_id,
-            query=text,
-            history=messages,
-            conversation_id=convo_id,
-            trace_id=trace_id,
-            mode=mode,
+        exec_task = asyncio.create_task(
+            AgentRuntime.execute(
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                query=text,
+                history=messages,
+                conversation_id=convo_id,
+                trace_id=trace_id,
+                mode=mode,
+            )
         )
+        t_exec = time.time()
+        ai_reply = None
+        try:
+            while not exec_task.done():
+                done, _ = await asyncio.wait({exec_task}, timeout=heartbeat_interval)
+                if done:
+                    break
+                if time.time() - t_exec > stream_timeout:
+                    exec_task.cancel()
+                    log_error(f"[Stream][{trace_id}] stream timeout after {stream_timeout}s — terminating run")
+                    timeout_msg = "The agent took too long to respond. Please try again."
+                    yield f"__EVENT__:{json.dumps({'type': 'assistant_message', 'trace_id': trace_id, 'content': timeout_msg})}\n"
+                    yield f"__EVENT__:{json.dumps({'type': 'run_timeout', 'trace_id': trace_id, 'error_code': 'AGENT_TIMEOUT', 'message': timeout_msg})}\n"
+                    return
+                yield f"__EVENT__:{json.dumps({'type': 'heartbeat', 'trace_id': trace_id})}\n"
+            ai_reply = exec_task.result()
+        except asyncio.CancelledError:
+            exec_task.cancel()
+            raise
+        except Exception as e:
+            log_error(f"[Stream][{trace_id}] AgentRuntime execution failed", exc=e)
+            ai_reply = {
+                "text": "I encountered an issue processing your request.",
+                "message": "I encountered an issue processing your request.",
+                "blocks": [{"type": "text", "data": {"text": "I encountered an issue processing your request."}}],
+                "tool_events": [],
+                "timings": {},
+                "knowledge_used": [],
+                "execution_status": "failed",
+                "terminal_state": "FAILED",
+                "error_code": "AGENT_RUNTIME_ERROR",
+                "action_state": [],
+            }
 
-        # 5. Emit structured tool lifecycle events
-        tool_events = ai_reply.get("tool_events") or []
-        for event in tool_events:
-            yield f"__EVENT__:{json.dumps(event)}\n"
-
-        # 6. Emit timing breakdown (debug tooling, no secrets)
-        timings = ai_reply.get("timings") or {}
-        yield f"__EVENT__:{json.dumps({'type': 'timing', 'trace_id': trace_id, 'timings': timings})}\n"
-
-        # 7. Emit metadata (blocks, knowledge used) — backward compatible
-        meta_payload = {
-            "trace_id": trace_id,
-            "mode": mode,
-            "knowledge_used": ai_reply.get("knowledge_used", []),
-            "blocks": ai_reply.get("blocks", []),
-            "execution_status": ai_reply.get("execution_status", "completed"),
-            "integration_used": ai_reply.get("integration_used"),
-            "action_state": ai_reply.get("action_state", []),
-            "timings": timings,
-        }
-        yield f"__METADATA__:{json.dumps(meta_payload)}\n"
-
-        # 8. Stream text chunks (no artificial typing delay)
         accumulated_text = ai_reply.get("text") or ""
-        chunk_size = 24
-        for idx in range(0, len(accumulated_text), chunk_size):
-            yield accumulated_text[idx:idx+chunk_size]
-        yield f"__EVENT__:{json.dumps({'type': 'assistant_message', 'trace_id': trace_id, 'content': accumulated_text})}\n"
+        if not accumulated_text.strip():
+            accumulated_text = "I wasn't able to generate a response. Please try again."
 
-        # 9. Persist AI message and update conversation metadata
-        ai_msg_id = f"msg_{uuid.uuid4().hex[:8]}"
-        ai_message = {
-            "id": ai_msg_id,
-            "sender_type": "agent",
-            "text": accumulated_text,
-            "blocks": ai_reply.get("blocks", []),
-            "tool_calls": ai_reply.get("tool_calls", []),
-            "time": time.strftime("%H:%M")
-        }
-        messages.append(ai_message)
+        # Derive the single terminal outcome for this run.
+        terminal_state = ai_reply.get("terminal_state") or (
+            "REAUTH_REQUIRED" if ai_reply.get("execution_status") == "reauth_required"
+            else "FAILED" if ai_reply.get("execution_status") in ("failed", "timed_out", "error")
+            else "COMPLETED"
+        )
+        execution_status = ai_reply.get("execution_status") or (
+            "completed" if terminal_state == "COMPLETED" else "failed"
+        )
+        error_code = ai_reply.get("error_code") or (
+            "AGENT_TIMEOUT" if terminal_state == "TIMED_OUT"
+            else "REAUTH_REQUIRED" if terminal_state == "REAUTH_REQUIRED"
+            else ""
+        )
+        integration_used = ai_reply.get("integration_used")
 
-        convo_ref.update({
-            "messages": messages,
-            "preview": accumulated_text[:60] + ("..." if len(accumulated_text) > 60 else ""),
-            "unread": False,
-            "intent": ai_reply.get("intent", "Inquire details"),
-            "confidence": ai_reply.get("confidence", 95),
-            "knowledge_used": ai_reply.get("knowledge_used", []),
-            "actions": ai_reply.get("actions", []),
-            "status": ai_reply.get("status", convo_data.get("status", "active")),
-            "integration_used": ai_reply.get("integration_used"),
-            "execution_status": ai_reply.get("execution_status", "completed"),
-            "action_state": ai_reply.get("action_state", []),
-            "mode": mode,
-        })
+        try:
+            # 5. Emit structured tool lifecycle events
+            tool_events = ai_reply.get("tool_events") or []
+            for event in tool_events:
+                yield f"__EVENT__:{json.dumps(event)}\n"
 
-        cls._increment_agent_convo_count(agent_id)
-        cls._persist_trace(trace_id, workspace_id, agent_id, convo_id, mode, ai_reply)
+            # 6. Emit timing breakdown (debug tooling, no secrets)
+            timings = ai_reply.get("timings") or {}
+            yield f"__EVENT__:{json.dumps({'type': 'timing', 'trace_id': trace_id, 'timings': timings})}\n"
+
+            # 7. Emit metadata (blocks, knowledge used) — backward compatible
+            meta_payload = {
+                "trace_id": trace_id,
+                "mode": mode,
+                "knowledge_used": ai_reply.get("knowledge_used", []),
+                "blocks": ai_reply.get("blocks", []),
+                "execution_status": execution_status,
+                "terminal_state": terminal_state,
+                "error_code": error_code,
+                "integration_used": integration_used,
+                "action_state": ai_reply.get("action_state", []),
+                "timings": timings,
+            }
+            yield f"__METADATA__:{json.dumps(meta_payload)}\n"
+
+            # 8. Stream text chunks (no artificial typing delay). Each chunk is
+            #    its own SSE frame so it can never glue onto a following event.
+            chunk_size = 24
+            for idx in range(0, len(accumulated_text), chunk_size):
+                yield accumulated_text[idx:idx + chunk_size] + "\n"
+            yield f"__EVENT__:{json.dumps({'type': 'assistant_message', 'trace_id': trace_id, 'content': accumulated_text})}\n"
+
+            # 9. Persist AI message and update conversation metadata
+            ai_msg_id = f"msg_{uuid.uuid4().hex[:8]}"
+            ai_message = {
+                "id": ai_msg_id,
+                "sender_type": "agent",
+                "text": accumulated_text,
+                "blocks": ai_reply.get("blocks", []),
+                "tool_calls": ai_reply.get("tool_calls", []),
+                "time": time.strftime("%H:%M"),
+            }
+            messages.append(ai_message)
+
+            convo_ref.update({
+                "messages": messages,
+                "preview": accumulated_text[:60] + ("..." if len(accumulated_text) > 60 else ""),
+                "unread": False,
+                "intent": ai_reply.get("intent", "Inquire details"),
+                "confidence": ai_reply.get("confidence", 95),
+                "knowledge_used": ai_reply.get("knowledge_used", []),
+                "actions": ai_reply.get("actions", []),
+                "status": ai_reply.get("status", convo_data.get("status", "active")),
+                "integration_used": integration_used,
+                "execution_status": execution_status,
+                "action_state": ai_reply.get("action_state", []),
+                "mode": mode,
+            })
+
+            cls._increment_agent_convo_count(agent_id)
+            cls._persist_trace(trace_id, workspace_id, agent_id, convo_id, mode, ai_reply)
+        except Exception as e:
+            # Even a persistence/emit failure must produce a visible terminal.
+            log_error(f"[Stream][{trace_id}] emit/persist failed", exc=e)
+            yield f"__EVENT__:{json.dumps({'type': 'run_failed', 'trace_id': trace_id, 'error_code': 'STREAM_INTERNAL_ERROR', 'message': 'Something went wrong completing this request. Please try again.'})}\n"
+            return
+
+        # 10. Exactly one terminal event, always, before the stream closes.
+        if terminal_state == "REAUTH_REQUIRED":
+            yield f"__EVENT__:{json.dumps({'type': 'reauth_required', 'trace_id': trace_id, 'integration': integration_used or '', 'message': accumulated_text})}\n"
+        elif terminal_state == "TIMED_OUT":
+            yield f"__EVENT__:{json.dumps({'type': 'run_timeout', 'trace_id': trace_id, 'error_code': 'AGENT_TIMEOUT', 'message': accumulated_text})}\n"
+        elif execution_status == "failed":
+            yield f"__EVENT__:{json.dumps({'type': 'run_failed', 'trace_id': trace_id, 'error_code': error_code or 'AGENT_ERROR', 'message': accumulated_text})}\n"
+        else:
+            yield f"__EVENT__:{json.dumps({'type': 'run_completed', 'trace_id': trace_id, 'execution_status': execution_status, 'terminal_state': terminal_state})}\n"
 
     @staticmethod
     def _persist_trace(trace_id: str, workspace_id: str, agent_id: str, conversation_id: str, mode: str, ai_reply: dict):
@@ -341,6 +425,8 @@ class ConversationService:
                 "mode": mode,
                 "request_start": time.time(),
                 "execution_status": ai_reply.get("execution_status", "completed"),
+                "terminal_state": ai_reply.get("terminal_state", "COMPLETED"),
+                "error_code": ai_reply.get("error_code", ""),
                 "status": ai_reply.get("status", "active"),
                 "intent": ai_reply.get("intent", ""),
                 "timings": ai_reply.get("timings") or {},

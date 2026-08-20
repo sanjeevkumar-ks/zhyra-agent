@@ -35,6 +35,10 @@ class AgentState(TypedDict):
     mode: str
     timings: Dict[str, Any]
     action_state: List[Dict[str, Any]]
+    empty_response: bool
+    generation_error: str
+    llm_attempts: int
+    execution_status: str
     # Workflow Execution State
     workflow_id: Optional[str]
     workflow_nodes: List[Dict[str, Any]]
@@ -188,19 +192,66 @@ async def generate_response_node(state: AgentState) -> Dict[str, Any]:
         f"tool_names={bound_tools}"
     )
 
+    # Bounded empty-response retry. The provider may return no text AND no tool
+    # call (blocked / safety / max-token / empty candidates). That is a handled
+    # condition, NEVER a silent completion: retry once with an explicit
+    # instruction, then record a typed error so the runtime surfaces it.
+    llm_attempts = int(state.get("llm_attempts") or 0)
+    empty_prompt = ""
+    if llm_attempts > 0:
+        empty_prompt = (
+            "\n\n[EMPTY RESPONSE CORRECTION]\n"
+            "Your previous turn returned no response. You MUST either: "
+            "(1) emit a function call to complete the requested action, or "
+            "(2) reply with a clear text message. Never return an empty response."
+        )
+
     structured = await ProviderManager.generate_structured(
         workspace_id=state["workspace_id"],
-        prompt=prompt,
+        prompt=prompt + empty_prompt,
         system_prompt=system_prompt,
         agent_override=agent_override,
         functions=functions_schema
     )
 
+    llm_attempts += 1
     duration_ms = int((time.time() - start_time) * 1000)
+
+    # Safe per-attempt LLM telemetry: provider, model, finish_reason, sizes.
+    # Never logs prompt/response content or credentials.
+    log_info(
+        f"[LLM] llm_attempt={llm_attempts} provider={getattr(structured, 'provider', '')} "
+        f"model={getattr(structured, 'model', '')} finish_reason={getattr(structured, 'finish_reason', '')} "
+        f"content_length={getattr(structured, 'content_length', len(structured.text or ''))} "
+        f"tool_call_count={getattr(structured, 'tool_call_count', len(getattr(structured, 'tool_calls', None) or []))} "
+        f"empty={bool(getattr(structured, 'empty', False))} latency_ms={duration_ms}"
+    )
 
     tool_calls = []
     for tc in (getattr(structured, "tool_calls", None) or []):
         tool_calls.append(tc.model_dump() if hasattr(tc, "model_dump") else dict(tc))
+
+    # Empty model response (no text, no tool calls) — bounded retry then error.
+    empty_response = bool(getattr(structured, "empty", False))
+    generation_error = ""
+    if empty_response and llm_attempts < 2:
+        return {
+            "ai_text": "",
+            "tool_calls": [],
+            "loop_count": state["loop_count"] + 1,
+            "prompt": prompt,
+            "system_prompt": system_prompt,
+            "timings": dict(state.get("timings") or {}),
+            "empty_response": True,
+            "llm_attempts": llm_attempts,
+        }
+    if empty_response:
+        generation_error = "EMPTY_MODEL_RESPONSE"
+        log_error(
+            f"[LLM] Empty model response after {llm_attempts} attempts "
+            f"provider={getattr(structured, 'provider', '')} model={getattr(structured, 'model', '')} "
+            f"finish_reason={getattr(structured, 'finish_reason', '')} trace_id={state.get('trace_id')}"
+        )
 
     # Track token usage statistics to Firestore
     try:
@@ -254,6 +305,9 @@ async def generate_response_node(state: AgentState) -> Dict[str, Any]:
         "prompt": prompt,
         "system_prompt": system_prompt,
         "timings": timings,
+        "empty_response": empty_response,
+        "generation_error": generation_error,
+        "llm_attempts": llm_attempts,
     }
 
 
@@ -394,6 +448,31 @@ async def finalize_node(state: AgentState) -> Dict[str, Any]:
     # Structured action state for the frontend (Requirement 31).
     action_state = ConversationService.build_action_state(state.get("tool_records") or [])
 
+    # --- Deterministic terminal handling. NEVER silently complete with no text.
+    empty_response = bool(state.get("empty_response"))
+    generation_error = state.get("generation_error") or ""
+    records = state.get("tool_records") or []
+    has_verified_success = any(
+        r.get("status") == "SUCCEEDED" and r.get("external_resource_id") for r in records
+    )
+    execution_status = state.get("execution_status") or "completed"
+
+    if empty_response and not has_verified_success:
+        ai_text = "The AI model didn't return a response. Please try again."
+        execution_status = "failed"
+        log_error(
+            f"[Finalize] Empty LLM response surfaced as error. generation_error={generation_error or 'EMPTY_MODEL_RESPONSE'} "
+            f"trace_id={state.get('trace_id')}"
+        )
+    elif generation_error and not has_verified_success:
+        ai_text = "Zhyra couldn't complete this request right now. Please try again."
+        execution_status = "failed"
+    elif not ai_text.strip() and not has_verified_success and not records:
+        # Final safety net: no text, no tool activity -> a terminal error, never
+        # a silent empty response.
+        ai_text = "I wasn't able to generate a response. Please try again."
+        execution_status = "failed"
+
     # Query lower for classification
     query_lower = state["user_query"].lower()
     intent = "Inquire details"
@@ -410,7 +489,15 @@ async def finalize_node(state: AgentState) -> Dict[str, Any]:
     elif "product" in query_lower or "inventory" in query_lower or "order" in query_lower or "shipping" in query_lower:
         intent = "Shopify Order / Commerce"
 
-    return {"ai_text": ai_text, "intent": intent, "status": status, "action_state": action_state}
+    return {
+        "ai_text": ai_text,
+        "intent": intent,
+        "status": status,
+        "action_state": action_state,
+        "empty_response": empty_response,
+        "generation_error": generation_error,
+        "execution_status": execution_status,
+    }
 
 
 def should_execute_tool(state: AgentState) -> str:
