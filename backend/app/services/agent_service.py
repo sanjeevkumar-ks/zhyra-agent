@@ -5,6 +5,16 @@ import uuid
 
 class AgentService:
     @staticmethod
+    async def _attach_channel_counts(workspace_id: str, agent_id: str, data: dict) -> dict:
+        try:
+            from app.channels.service import ChannelService
+            counts = await ChannelService.channel_counts(workspace_id, agent_id)
+            data["channel_counts"] = counts
+        except Exception:
+            data["channel_counts"] = {"total": 7, "supported": 2, "connected": 0, "published": 0}
+        return data
+
+    @staticmethod
     async def list_agents(workspace_id: str) -> list:
         coll = firestore_client.collection("agents")
         docs = coll.stream()
@@ -27,6 +37,7 @@ class AgentService:
             if data.get("workspace_id") == workspace_id:
                 aid = data.get("id")
                 data["conversations_today"] = convo_counts.get(aid, 0)
+                data = await AgentService._attach_channel_counts(workspace_id, aid, data)
                 results.append(data)
         return results
 
@@ -52,7 +63,7 @@ class AgentService:
             pass
 
         data["conversations_today"] = count
-        return data
+        return await AgentService._attach_channel_counts(workspace_id, agent_id, data)
 
     @staticmethod
     def _sync_agent_tools_to_integrations(workspace_id: str, agent_id: str, agent_name: str, updated_tools: list):

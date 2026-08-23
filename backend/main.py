@@ -16,6 +16,8 @@ from app.api import (
     billing, analytics, memory, team, workflows, context, notifications, widget,
     admin_debug, playground,
 )
+from app.api import channels as channels_api
+from app.api import telegram as telegram_webhook
 from app.api.admin import (
     auth as admin_auth,
     users as admin_users,
@@ -120,6 +122,8 @@ app.include_router(auth.router, prefix="/api/auth", tags=["Authentication"])
 app.include_router(users.router, prefix="/api/users", tags=["User Profile"])
 app.include_router(workspaces.router, prefix="/api/workspaces", tags=["Workspaces"])
 app.include_router(agents.router, prefix="/api/agents", tags=["AI Agents"])
+app.include_router(channels_api.router, prefix="/api/agents", tags=["Agent Channels"])
+app.include_router(telegram_webhook.router, prefix="/api/channels", tags=["Telegram Webhook"])
 app.include_router(workflows.router, prefix="/api/workflows", tags=["Workflows"])
 app.include_router(conversations.router, prefix="/api/conversations", tags=["Conversations"])
 app.include_router(knowledge.router, prefix="/api/knowledge", tags=["Knowledge Base"])

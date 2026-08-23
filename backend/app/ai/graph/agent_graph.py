@@ -6,6 +6,7 @@ from app.ai.tools.tool_registry import ToolRegistry
 from app.providers.manager import ProviderManager
 from app.database.firestore import firestore_client
 from app.utils.logger import log_info, log_error
+from app.ai.intent.classifier import classify_intent, IntentClassification
 
 
 class AgentState(TypedDict):
@@ -39,6 +40,8 @@ class AgentState(TypedDict):
     generation_error: str
     llm_attempts: int
     execution_status: str
+    intent_classification: Optional[Dict[str, Any]]
+    stream_events: List[Dict[str, Any]]  # For streaming events to UI
     # Workflow Execution State
     workflow_id: Optional[str]
     workflow_nodes: List[Dict[str, Any]]
@@ -50,29 +53,87 @@ class AgentState(TypedDict):
 # Nodes for Standard Execution Graph
 # -------------------------------------------------------------
 
+async def classify_intent_node(state: AgentState) -> Dict[str, Any]:
+    """Fast deterministic intent classification (no LLM call)."""
+    import time
+    t_start = time.time()
+    
+    classification: IntentClassification = classify_intent(state["user_query"])
+    
+    timings = dict(state.get("timings") or {})
+    timings["intent_classifier_ms"] = int((time.time() - t_start) * 1000)
+    
+    log_info(
+        f"[Intent] intent={classification.intent} type={classification.type} "
+        f"confidence={classification.confidence:.2f} domain={classification.domain} "
+        f"suggested_tools={classification.suggested_tools} "
+        f"trace_id={state.get('trace_id')}"
+    )
+    
+    # Emit intent_detected event for streaming
+    stream_events = list(state.get("stream_events") or [])
+    stream_events.append({
+        "type": "intent_detected",
+        "intent": classification.intent,
+        "intent_type": classification.type,
+        "confidence": classification.confidence,
+        "domain": classification.domain,
+        "trace_id": state.get("trace_id"),
+    })
+    
+    return {
+        "intent_classification": {
+            "intent": classification.intent,
+            "type": classification.type,
+            "confidence": classification.confidence,
+            "domain": classification.domain,
+            "suggested_tools": classification.suggested_tools,
+        },
+        "timings": timings,
+        "stream_events": stream_events,
+    }
+
+
 async def retrieve_context_node(state: AgentState) -> Dict[str, Any]:
     """Retrieves document context using lightweight Context Engine + Dynamic Tool Registry."""
     import time
     from app.ai.context.engine import ContextEngine
     from app.ai.integration.dynamic_registry import DynamicToolRegistry
-    from app.ai.gate import is_action_request
-
+    
     t_start = time.time()
-
+    
+    # Get intent classification from state
+    intent_cls = state.get("intent_classification") or {}
+    intent_type = intent_cls.get("type", "UNKNOWN")
+    suggested_tools = intent_cls.get("suggested_tools", [])
+    
     # Compile dynamic tool instructions only for connected, permitted tools.
     # Lightweight: no network validation of tokens at request time.
     agent_tools = state["agent_data"].get("tools") or []
-    tools_instructions, ready_ids = await DynamicToolRegistry.get_available_tools_prompt(
-        workspace_id=state["workspace_id"],
-        agent_id=state["agent_id"],
-        agent_tools=agent_tools
-    )
-
+    
+    # Use intent-routed tools if available, otherwise fall back to all assigned tools
+    if suggested_tools:
+        tools_instructions, ready_ids = await DynamicToolRegistry.get_available_tools_prompt(
+            workspace_id=state["workspace_id"],
+            agent_id=state["agent_id"],
+            agent_tools=suggested_tools
+        )
+        log_info(
+            f"[Tool Routing] intent={intent_cls.get('intent')} type={intent_type} "
+            f"selected_tools={ready_ids} tool_count={len(ready_ids)} "
+            f"trace_id={state.get('trace_id')}"
+        )
+    else:
+        tools_instructions, ready_ids = await DynamicToolRegistry.get_available_tools_prompt(
+            workspace_id=state["workspace_id"],
+            agent_id=state["agent_id"],
+            agent_tools=agent_tools
+        )
+    
     # Action requests do NOT need RAG. A "schedule a calendar event" query must
-    # not load unrelated knowledge PDFs (e.g. a resume) — tool execution is the
-    # source of truth. Skipping retrieval avoids the embedding call, the vector
-    # search, and a bloated LLM prompt (major latency + hallucination driver).
-    skip_retrieval = is_action_request(state["user_query"])
+    # not load unrelated knowledge PDFs — tool execution is the source of truth.
+    # CHAT requests also skip RAG for minimal context.
+    skip_retrieval = intent_type in ("ACTION", "CHAT")
     config_override = {"rag_enabled": not skip_retrieval}
     packet = await ContextEngine.build(
         workspace_id=state["workspace_id"],
@@ -82,29 +143,44 @@ async def retrieve_context_node(state: AgentState) -> Dict[str, Any]:
         history=state["history"],
         config_override=config_override
     )
-
+    
     # Prepend dynamic tool prompt
     if tools_instructions:
         packet.tool_prompt = tools_instructions + (packet.tool_prompt or "")
-
+    
     packet_dict = packet.model_dump()
     packet_dict["ready_tools"] = ready_ids
-
+    
     timings = dict(state.get("timings") or {})
-    timings["tools_loading_ms"] = int((time.time() - t_start) * 1000)
-
+    timings["context_build_ms"] = int((time.time() - t_start) * 1000)
+    
     if skip_retrieval:
         log_info(
-            f"[Context] Skipping RAG retrieval for action request "
+            f"[Context] Skipping RAG retrieval for {intent_type.lower()} request "
             f"agent_id={state['agent_id']} workspace_id={state['workspace_id']} "
-            f"ready_tools={len(ready_ids)}"
+            f"ready_tools={len(ready_ids)} trace_id={state.get('trace_id')}"
         )
-
+    else:
+        log_info(
+            f"[Context] RAG enabled for {intent_type.lower()} request "
+            f"cited_sources={packet.cited_sources} trace_id={state.get('trace_id')}"
+        )
+    
+    # Emit tool_selected event for streaming
+    stream_events = list(state.get("stream_events") or [])
+    stream_events.append({
+        "type": "tool_selected",
+        "tools": ready_ids,
+        "tool_count": len(ready_ids),
+        "trace_id": state.get("trace_id"),
+    })
+    
     return {
         "context": packet.rag_context,
         "cited_sources": packet.cited_sources,
         "context_packet": packet_dict,
         "timings": timings,
+        "stream_events": stream_events,
     }
 
 
@@ -154,7 +230,11 @@ async def generate_response_node(state: AgentState) -> Dict[str, Any]:
         "- Break your response into short, readable paragraphs (maximum 2-3 sentences each).\n"
         "- Use bullet points or numbered lists where appropriate.\n"
         "- Use bold styling (**text**) to highlight key names, metrics, status values, dates, or prices.\n"
-        "- Keep your response clear, organized, and scannable."
+        "- Keep your response clear, organized, and scannable.\n\n"
+        "OUTPUT CONSTRAINTS:\n"
+        "- For tool calls: emit ONLY the function call, no explanatory text.\n"
+        "- For final responses: be concise, max 3-4 short paragraphs.\n"
+        "- Do not include reasoning, chain-of-thought, or apologies before tool calls."
     )
 
     # Simulation mode is explicit: the model is told tool results are simulated
@@ -183,19 +263,15 @@ async def generate_response_node(state: AgentState) -> Dict[str, Any]:
     from app.ai.integration.dynamic_registry import DynamicToolRegistry
     functions_schema = DynamicToolRegistry.get_tool_schemas(ready_ids) if ready_ids else None
 
-    # Tool-binding verification (Requirement 3): log exactly what the LLM
-    # instance receives so a tool binding break is visible in the logs.
+    # Tool-binding verification: log exactly what the LLM instance receives
     bound_tools = [s.get("name", "") for s in (functions_schema or [])]
     log_info(
         f"[Tool Binding] agent_id={state['agent_id']} workspace_id={state['workspace_id']} "
         f"mode={state.get('mode') or 'live'} tool_count={len(bound_tools)} "
-        f"tool_names={bound_tools}"
+        f"tool_names={bound_tools} trace_id={state.get('trace_id')}"
     )
 
-    # Bounded empty-response retry. The provider may return no text AND no tool
-    # call (blocked / safety / max-token / empty candidates). That is a handled
-    # condition, NEVER a silent completion: retry once with an explicit
-    # instruction, then record a typed error so the runtime surfaces it.
+    # Bounded empty-response retry
     llm_attempts = int(state.get("llm_attempts") or 0)
     empty_prompt = ""
     if llm_attempts > 0:
@@ -217,14 +293,14 @@ async def generate_response_node(state: AgentState) -> Dict[str, Any]:
     llm_attempts += 1
     duration_ms = int((time.time() - start_time) * 1000)
 
-    # Safe per-attempt LLM telemetry: provider, model, finish_reason, sizes.
-    # Never logs prompt/response content or credentials.
+    # Safe per-attempt LLM telemetry
     log_info(
         f"[LLM] llm_attempt={llm_attempts} provider={getattr(structured, 'provider', '')} "
         f"model={getattr(structured, 'model', '')} finish_reason={getattr(structured, 'finish_reason', '')} "
         f"content_length={getattr(structured, 'content_length', len(structured.text or ''))} "
         f"tool_call_count={getattr(structured, 'tool_call_count', len(getattr(structured, 'tool_calls', None) or []))} "
-        f"empty={bool(getattr(structured, 'empty', False))} latency_ms={duration_ms}"
+        f"empty={bool(getattr(structured, 'empty', False))} latency_ms={duration_ms} "
+        f"trace_id={state.get('trace_id')}"
     )
 
     tool_calls = []
@@ -297,7 +373,15 @@ async def generate_response_node(state: AgentState) -> Dict[str, Any]:
 
     timings = dict(state.get("timings") or {})
     timings["llm_ms"] = duration_ms
-
+    
+    # Emit response_started event if there are no tool calls (final response)
+    stream_events = list(state.get("stream_events") or [])
+    if not tool_calls:
+        stream_events.append({
+            "type": "response_started",
+            "trace_id": state.get("trace_id"),
+        })
+    
     return {
         "ai_text": structured.text,
         "tool_calls": tool_calls,
@@ -308,6 +392,7 @@ async def generate_response_node(state: AgentState) -> Dict[str, Any]:
         "empty_response": empty_response,
         "generation_error": generation_error,
         "llm_attempts": llm_attempts,
+        "stream_events": stream_events,
     }
 
 
@@ -316,6 +401,7 @@ async def execute_tool_node(state: AgentState) -> Dict[str, Any]:
     from app.services.tool_executor import ToolExecutor
     from app.ai.tools.models import ToolCall
     import time
+    import asyncio
 
     t_start = time.time()
     tool_calls = state.get("tool_calls") or []
@@ -326,9 +412,10 @@ async def execute_tool_node(state: AgentState) -> Dict[str, Any]:
     results = []
     trace_id = state.get("trace_id") or ""
     mode = state.get("mode") or "live"
-    for tc_dict in tool_calls:
+    
+    # Execute independent tool calls in parallel
+    async def execute_single(tc_dict):
         tc = ToolCall(**tc_dict) if isinstance(tc_dict, dict) else tc_dict
-        # Make tool-call IDs unique per request (LLM may emit generic ids like "call_0")
         if not tc.id or tc.id.startswith("call_") or tc.id.startswith("tc"):
             tc.id = f"{trace_id or 'req'}_{tc.id or 'tc'}"
         log_info(
@@ -343,35 +430,67 @@ async def execute_tool_node(state: AgentState) -> Dict[str, Any]:
             user_id=state["user_id"],
             mode=mode,
         )
-        records.append(record.to_dict())
-        results.append(record.to_user_payload())
-        log_info(
-            f"[Tool Execution Completed] trace_id={trace_id} "
-            f"selected_tool_name={tc.name} status={record.status} simulated={record.simulated} "
-            f"error_code={record.error_code} external_resource_id={record.external_resource_id} duration_ms={record.duration_ms}"
-        )
+        return record, tc
 
-        # Record issue to Firestore if a real (non-simulated) tool execution failed
-        if record.status == "FAILED" and not record.simulated:
-            try:
-                issue_ref = firestore_client.collection("issues").document()
-                issue_ref.set({
-                    "id": issue_ref.id,
-                    "workspace_id": state["workspace_id"],
-                    "agent_id": state["agent_id"],
-                    "agent_name": state["agent_data"].get("name", "Agent"),
-                    "title": f"{tc.name} Action Failed: {record.error_code or 'ERROR'}",
-                    "severity": "high" if record.error_code in ["REAUTH_REQUIRED", "TOKEN_EXPIRED", "TOKEN_REFRESH_FAILED"] else "medium",
-                    "status": "open",
-                    "integration": record.integration_id,
-                    "occurrences": 1,
-                    "first_detected": time.time(),
-                    "last_detected": time.time(),
-                    "error_details": record.message,
-                    "timestamp": time.time()
-                })
-            except Exception as err:
-                log_error("Failed to log issue to Firestore", exc=err)
+    # Run all tool calls concurrently
+    exec_tasks = [execute_single(tc_dict) for tc_dict in tool_calls]
+    exec_results = await asyncio.gather(*exec_tasks, return_exceptions=True)
+    
+    for i, result in enumerate(exec_results):
+        if isinstance(result, Exception):
+            log_error(f"Tool execution failed with exception: {result}", exc=result)
+            tc_dict = tool_calls[i]
+            tc = ToolCall(**tc_dict) if isinstance(tc_dict, dict) else tc_dict
+            from app.ai.tools.models import ToolExecutionRecord
+            record = ToolExecutionRecord(
+                id=f"tre_{i}",
+                tool_call_id=tc.id,
+                workspace_id=state["workspace_id"],
+                agent_id=state["agent_id"],
+                conversation_id=state["conversation_id"],
+                tool=tc.name,
+                action=tc.action or "execute",
+                integration_id=tc.integration_id,
+                status="FAILED",
+                error_code="EXECUTION_ERROR",
+                message=str(result),
+                started_at=t_start,
+                completed_at=time.time(),
+                duration_ms=int((time.time() - t_start) * 1000),
+            )
+            records.append(record.to_dict())
+            results.append(record.to_user_payload())
+        else:
+            record, tc = result
+            records.append(record.to_dict())
+            results.append(record.to_user_payload())
+            log_info(
+                f"[Tool Execution Completed] trace_id={trace_id} "
+                f"selected_tool_name={tc.name} status={record.status} simulated={record.simulated} "
+                f"error_code={record.error_code} external_resource_id={record.external_resource_id} duration_ms={record.duration_ms}"
+            )
+
+            # Record issue to Firestore if a real (non-simulated) tool execution failed
+            if record.status == "FAILED" and not record.simulated:
+                try:
+                    issue_ref = firestore_client.collection("issues").document()
+                    issue_ref.set({
+                        "id": issue_ref.id,
+                        "workspace_id": state["workspace_id"],
+                        "agent_id": state["agent_id"],
+                        "agent_name": state["agent_data"].get("name", "Agent"),
+                        "title": f"{tc.name} Action Failed: {record.error_code or 'ERROR'}",
+                        "severity": "high" if record.error_code in ["REAUTH_REQUIRED", "TOKEN_EXPIRED", "TOKEN_REFRESH_FAILED"] else "medium",
+                        "status": "open",
+                        "integration": record.integration_id,
+                        "occurrences": 1,
+                        "first_detected": time.time(),
+                        "last_detected": time.time(),
+                        "error_details": record.message,
+                        "timestamp": time.time()
+                    })
+                except Exception as err:
+                    log_error("Failed to log issue to Firestore", exc=err)
 
     # Build deterministic final message from verified results.
     # No second LLM call: verified results are authoritative and faster.
@@ -383,6 +502,27 @@ async def execute_tool_node(state: AgentState) -> Dict[str, Any]:
 
     timings = dict(state.get("timings") or {})
     timings["tool_execution_ms"] = int((time.time() - t_start) * 1000)
+    
+    # Emit tool_started and tool_completed events for streaming
+    stream_events = list(state.get("stream_events") or [])
+    for rec in records:
+        stream_events.append({
+            "type": "tool_started",
+            "tool": rec.get("tool", ""),
+            "action": rec.get("action", ""),
+            "trace_id": state.get("trace_id"),
+        })
+        stream_events.append({
+            "type": "tool_completed",
+            "tool": rec.get("tool", ""),
+            "action": rec.get("action", ""),
+            "status": rec.get("status", ""),
+            "simulated": rec.get("simulated", False),
+            "external_resource_id": rec.get("external_resource_id"),
+            "error_code": rec.get("error_code"),
+            "duration_ms": rec.get("duration_ms"),
+            "trace_id": state.get("trace_id"),
+        })
 
     return {
         "ai_text": ai_text,
@@ -391,6 +531,7 @@ async def execute_tool_node(state: AgentState) -> Dict[str, Any]:
         "tool_calls": [],
         "actions": actions,
         "timings": timings,
+        "stream_events": stream_events,
     }
 
 
@@ -473,21 +614,17 @@ async def finalize_node(state: AgentState) -> Dict[str, Any]:
         ai_text = "I wasn't able to generate a response. Please try again."
         execution_status = "failed"
 
-    # Query lower for classification
-    query_lower = state["user_query"].lower()
-    intent = "Inquire details"
+    # Use intent classification from earlier node
+    intent_cls = state.get("intent_classification") or {}
+    intent = intent_cls.get("intent", "General Inquiry").replace("_", " ").title()
     status = state.get("status", "active")
-
-    if "appointment" in query_lower or "schedule" in query_lower or "book" in query_lower or "meet" in query_lower:
-        intent = "Book Appointment / Schedule Meeting"
-    elif "refund" in query_lower or "cancel" in query_lower or "charge" in query_lower:
-        intent = "Refund / Cancellation"
-        if "angry" in query_lower or "terrible" in query_lower:
-            status = "escalated"
-    elif "price" in query_lower or "cost" in query_lower or "discount" in query_lower:
-        intent = "Pricing Question"
-    elif "product" in query_lower or "inventory" in query_lower or "order" in query_lower or "shipping" in query_lower:
-        intent = "Shopify Order / Commerce"
+    
+    # Emit response_started event for streaming
+    stream_events = list(state.get("stream_events") or [])
+    stream_events.append({
+        "type": "response_started",
+        "trace_id": state.get("trace_id"),
+    })
 
     return {
         "ai_text": ai_text,
@@ -497,6 +634,7 @@ async def finalize_node(state: AgentState) -> Dict[str, Any]:
         "empty_response": empty_response,
         "generation_error": generation_error,
         "execution_status": execution_status,
+        "stream_events": stream_events,
     }
 
 
@@ -527,19 +665,15 @@ async def execute_workflow_node(state: AgentState) -> Dict[str, Any]:
     actions = list(state.get("actions", []))
     actions.append(f"Workflow: {nlabel} ({ntype}) executed")
 
-    # Initialize updates dict
     updates = {"actions": actions}
 
-    # 1. Type specific logic
     if ntype == "knowledge":
-        # Run retrieval and update context
         context_str, cited = await AIRetriever.retrieve_context(
             state["workspace_id"], state["agent_data"], state["user_query"]
         )
         updates["context"] = state.get("context", "") + "\n\n" + context_str
         updates["cited_sources"] = list(set(state.get("cited_sources", []) + cited))
     elif ntype in ["booking", "email", "crm", "calendar", "api", "payment"]:
-        # Run corresponding tool/API logic. Only registered tools may execute.
         tool_name = node.get("tool") or ntype
         fallback = node.get("fallback", "")
         method = "execute"
@@ -589,6 +723,7 @@ def build_agent_graph() -> StateGraph:
     workflow = StateGraph(AgentState)
 
     # Define standard nodes
+    workflow.add_node("classify_intent", classify_intent_node)
     workflow.add_node("retrieve_context", retrieve_context_node)
     workflow.add_node("generate_response", generate_response_node)
     workflow.add_node("execute_tool", execute_tool_node)
@@ -599,13 +734,12 @@ def build_agent_graph() -> StateGraph:
 
     # Setup routing helper based on workflow status
     def route_start(state: AgentState) -> str:
-        from app.ai.gate import is_action_request
         # Direct action/tool requests ALWAYS take the standard tool path so the
         # request is handled by the real tool pipeline. An unrelated workflow
         # (e.g. "User Signup -> Send Welcome Email") must not hijack
         # "schedule a calendar event" and inject its own tool results into the
         # response gate (which could validate an unrelated success claim).
-        if is_action_request(state.get("user_query", "")):
+        if state.get("intent_classification", {}).get("type") == "ACTION":
             return "retrieve_context"
         if state.get("workflow_id") and state.get("current_node_id"):
             return "workflow_step"
@@ -620,6 +754,7 @@ def build_agent_graph() -> StateGraph:
     )
 
     # Standard Flow edges
+    workflow.add_edge("classify_intent", "retrieve_context")
     workflow.add_edge("retrieve_context", "generate_response")
 
     workflow.add_conditional_edges(

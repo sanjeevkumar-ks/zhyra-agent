@@ -337,16 +337,21 @@ class ConversationService:
         integration_used = ai_reply.get("integration_used")
 
         try:
-            # 5. Emit structured tool lifecycle events
+            # 5. Emit structured execution events from the graph
+            stream_events = ai_reply.get("stream_events") or []
+            for event in stream_events:
+                yield f"__EVENT__:{json.dumps(event)}\n"
+            
+            # 6. Emit structured tool lifecycle events
             tool_events = ai_reply.get("tool_events") or []
             for event in tool_events:
                 yield f"__EVENT__:{json.dumps(event)}\n"
-
-            # 6. Emit timing breakdown (debug tooling, no secrets)
+            
+            # 7. Emit timing breakdown (debug tooling, no secrets)
             timings = ai_reply.get("timings") or {}
             yield f"__EVENT__:{json.dumps({'type': 'timing', 'trace_id': trace_id, 'timings': timings})}\n"
-
-            # 7. Emit metadata (blocks, knowledge used) — backward compatible
+            
+            # 8. Emit metadata (blocks, knowledge used) — backward compatible
             meta_payload = {
                 "trace_id": trace_id,
                 "mode": mode,
@@ -360,8 +365,8 @@ class ConversationService:
                 "timings": timings,
             }
             yield f"__METADATA__:{json.dumps(meta_payload)}\n"
-
-            # 8. Stream text chunks (no artificial typing delay). Each chunk is
+            
+            # 9. Stream text chunks (no artificial typing delay). Each chunk is
             #    its own SSE frame so it can never glue onto a following event.
             chunk_size = 24
             for idx in range(0, len(accumulated_text), chunk_size):

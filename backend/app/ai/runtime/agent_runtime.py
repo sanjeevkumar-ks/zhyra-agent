@@ -141,6 +141,7 @@ class AgentRuntime:
             "timings": {
                 "agent_loading_ms": int((time.time() - t0) * 1000),
             },
+            "stream_events": [],
             "workflow_id": workflow_id,
             "workflow_nodes": workflow_nodes,
             "workflow_edges": workflow_edges,
@@ -261,8 +262,55 @@ class AgentRuntime:
                     "trace_id": trace_id,
                 })
             res_dict["tool_events"] = tool_events
+            
+            # Add stream events for streaming protocol
+            stream_events = final_state.get("stream_events") or []
+            res_dict["stream_events"] = stream_events
 
             log_info(f"[Runtime][{trace_id}] completed terminal={terminal_state} status={execution_status} tool_calls={len(records)}")
+            
+            # Emit structured PERF timing log
+            perf_timings = timings
+            log_info(
+                f"[PERF] "
+                f"agent_load_ms={perf_timings.get('agent_loading_ms', 0)} "
+                f"intent_router_ms={perf_timings.get('intent_classifier_ms', 0)} "
+                f"context_build_ms={perf_timings.get('context_build_ms', 0)} "
+                f"rag_ms={perf_timings.get('rag_ms', 0)} "
+                f"tool_schema_ms={perf_timings.get('tools_loading_ms', 0)} "
+                f"llm_first_token_ms={perf_timings.get('llm_first_token_ms', 0)} "
+                f"llm_total_ms={perf_timings.get('llm_ms', 0)} "
+                f"tool_execution_ms={perf_timings.get('tool_execution_ms', 0)} "
+                f"response_format_ms={perf_timings.get('final_response_ms', 0)} "
+                f"total_ms={perf_timings.get('total_ms', 0)} "
+                f"trace_id={trace_id}"
+            )
+            
+            # Structured observability log
+            intent_cls = final_state.get("intent_classification") or {}
+            selected_tools = intent_cls.get("suggested_tools", [])
+            # Get token usage from timings if available
+            input_tokens = perf_timings.get("input_tokens", 0)
+            output_tokens = perf_timings.get("output_tokens", 0)
+            
+            log_info(
+                f"[OBSERVABILITY] "
+                f"request_id={trace_id} "
+                f"workspace_id={workspace_id} "
+                f"agent_id={agent_id} "
+                f"conversation_id={conversation_id} "
+                f"intent={intent_cls.get('intent', 'unknown')} "
+                f"selected_tools={selected_tools} "
+                f"input_tokens={input_tokens} "
+                f"output_tokens={output_tokens} "
+                f"llm_model={final_state.get('model', 'unknown')} "
+                f"llm_latency_ms={perf_timings.get('llm_ms', 0)} "
+                f"tool_latency_ms={perf_timings.get('tool_execution_ms', 0)} "
+                f"rag_latency_ms={perf_timings.get('rag_ms', 0)} "
+                f"total_latency_ms={perf_timings.get('total_ms', 0)} "
+                f"action_status={terminal_state} "
+            )
+            
             return res_dict
         except Exception as e:
             log_error(f"LangGraph runtime execution failed for agent {agent_id}", exc=e)

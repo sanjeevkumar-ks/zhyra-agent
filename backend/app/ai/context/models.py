@@ -1,5 +1,7 @@
 from pydantic import BaseModel, Field
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Literal
+
+IntentType = Literal["ACTION", "KNOWLEDGE", "CHAT", "UNKNOWN"]
 
 class ContextConfig(BaseModel):
     max_history_messages: int = Field(default=8, description="Rolling conversation history limit")
@@ -14,6 +16,17 @@ class ContextConfig(BaseModel):
     compress_rag: bool = Field(default=True, description="Enable sentence-level text compression on RAG chunks")
     rag_enabled: bool = Field(default=True, description="Set False to skip RAG retrieval entirely (e.g. action/tool requests)")
     enable_fallback_mock_rag: bool = Field(default=False, description="Never fabricate RAG content when nothing was retrieved")
+    
+    # Intent-aware context reduction
+    intent_type: Optional[IntentType] = Field(default=None, description="Request intent type for context optimization")
+    action_max_history: int = Field(default=4, description="Max history messages for ACTION requests")
+    chat_max_history: int = Field(default=3, description="Max history messages for CHAT requests")
+    knowledge_max_history: int = Field(default=6, description="Max history messages for KNOWLEDGE requests")
+    action_memory_budget: int = Field(default=200, description="Memory budget for ACTION requests")
+    chat_memory_budget: int = Field(default=0, description="Memory budget for CHAT requests (disabled)")
+    knowledge_memory_budget: int = Field(default=800, description="Memory budget for KNOWLEDGE requests")
+    action_rag_budget: int = Field(default=0, description="RAG budget for ACTION requests (disabled)")
+    knowledge_rag_budget: int = Field(default=2500, description="RAG budget for KNOWLEDGE requests")
 
 class ContextBudget(BaseModel):
     total_context_budget: int

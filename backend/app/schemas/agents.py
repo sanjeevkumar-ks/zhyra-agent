@@ -62,6 +62,7 @@ class AgentResponse(AgentBase):
     resolution_rate: int = 100
     health: int = 100
     recent_improvement: Optional[str] = "Initialized."
+    channel_counts: Optional[dict] = None
 
     class Config:
         from_attributes = True

@@ -20,7 +20,6 @@ export default function Agents() {
   const [role, setRole] = useState("");
   const [goals, setGoals] = useState("");
   const [capabilities, setCapabilities] = useState("");
-  const [channels, setChannels] = useState<string[]>(["Web Chat"]);
 
   // API Queries
   const { data: agents = [], isLoading } = useQuery({
@@ -40,7 +39,6 @@ export default function Agents() {
       setRole("");
       setGoals("");
       setCapabilities("");
-      setChannels(["Web Chat"]);
     },
   });
 
@@ -81,17 +79,10 @@ export default function Agents() {
       role,
       goals: goals.split(",").map((g) => g.trim()).filter(Boolean),
       capabilities: capabilities.split(",").map((c) => c.trim()).filter(Boolean),
-      channels,
       status: "active",
       initials,
       avatar_gradient,
     });
-  };
-
-  const toggleChannel = (ch: string) => {
-    setChannels((curr) =>
-      curr.includes(ch) ? curr.filter((c) => c !== ch) : [...curr, ch]
-    );
   };
 
   const filtered = agents.filter((a) => filter === "all" || a.status === filter);
@@ -203,15 +194,13 @@ export default function Agents() {
                 </div>
 
                 <div className="flex items-center gap-1.5 text-[12px] text-ink-faint">
-                  {agent.channels && agent.channels.length > 0 ? (
-                    agent.channels.map((c: string, i: number) => (
-                      <span key={c} className="flex items-center gap-1.5">
-                        {i > 0 && <span className="h-0.5 w-0.5 rounded-full bg-ink-faint" />}
-                        {c}
-                      </span>
-                    ))
+                  {agent.channel_counts && agent.channel_counts.published > 0 ? (
+                    <span className="flex items-center gap-1.5">
+                      <span className="flex h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                      {agent.channel_counts.published}/{agent.channel_counts.total} channels live
+                    </span>
                   ) : (
-                    <span>Web Chat</span>
+                    <span>No channels live</span>
                   )}
                 </div>
               </div>
@@ -334,23 +323,9 @@ export default function Agents() {
 
               <div className="space-y-2">
                 <label className="text-[12px] text-ink-faint">Channels</label>
-                <div className="flex flex-wrap gap-2">
-                  {["Web Chat", "WhatsApp", "Email", "Slack", "Phone", "SMS"].map((ch) => {
-                    const active = channels.includes(ch);
-                    return (
-                      <button
-                        type="button"
-                        key={ch}
-                        onClick={() => toggleChannel(ch)}
-                        className={`rounded-full border px-3 py-1.5 text-[12.5px] font-medium transition-colors ${
-                          active ? "border-accent bg-accent-soft text-accent" : "border-line bg-surface text-ink-soft"
-                        }`}
-                      >
-                        {ch}
-                      </button>
-                    );
-                  })}
-                </div>
+                <p className="text-[12.5px] text-ink-soft">
+                  Deploy channels (Web Chat, Telegram, ...) from the agent's Channels tab after creation.
+                </p>
               </div>
 
               <div className="pt-4 flex gap-3">

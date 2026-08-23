@@ -19,6 +19,7 @@ import VoiceStudio from "./pages/VoiceStudio";
 import LandingPage from "./pages/LandingPage";
 import AuthPage from "./pages/AuthPage";
 import OnboardingPage from "./pages/OnboardingPage";
+import WidgetPage from "./pages/WidgetPage";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -104,6 +105,9 @@ function MainRoutes() {
         <Route path="/signin" element={<AuthPage mode="signin" />} />
         <Route path="/signup" element={<AuthPage mode="signup" />} />
         <Route path="/onboarding" element={<OnboardingPage />} />
+
+        {/* Public widget page (embedded in an iframe on external sites — no auth) */}
+        <Route path="/widget/:widgetId" element={<WidgetPage />} />
 
         {/* Protected Customer Workspace Routes */}
         <Route

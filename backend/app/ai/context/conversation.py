@@ -13,7 +13,8 @@ class ConversationContextBuilder:
         conversation_id: str,
         history: List[Dict[str, Any]],
         config: ContextConfig,
-        budget_limit: int
+        budget_limit: int,
+        max_history: int = None
     ) -> Tuple[str, int, str]:
         """
         Builds a rolling window conversation context. 
@@ -22,7 +23,7 @@ class ConversationContextBuilder:
         if not history:
             return "", 0, ""
 
-        max_msgs = config.max_history_messages
+        max_msgs = max_history or config.max_history_messages
         recent_msgs = history[-max_msgs:]
         older_msgs = history[:-max_msgs]
 

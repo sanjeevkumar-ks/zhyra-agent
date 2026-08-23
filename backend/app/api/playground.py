@@ -3,6 +3,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from typing import List, Dict, Any, Optional
 import time
+import json
 
 from app.api.workspaces import get_user_workspace_id
 from app.database.firestore import firestore_client
@@ -157,7 +158,7 @@ async def stream_playground_session(
                 yield f"data: {chunk}\n\n"
             yield "data: [DONE]\n\n"
         except HTTPException as exc:
-            yield f"data: __ACK__:{{\"status\":\"error\",\"message\":{__import__('json').dumps(str(exc.detail))}}}\n\n"
+            yield f"data: __ACK__:{json.dumps({'status': 'error', 'message': str(exc.detail)})}\n\n"
             yield "data: [DONE]\n\n"
         except Exception as e:
             yield f"data: [Error: {str(e)}]\n\n"
@@ -257,6 +258,7 @@ async def get_playground_agent_status(
             "connection_status": status,
             "message": message,
             "token_state": token_state,
+            "detail": detail,
             "ready_tools": ready_tools,
             "oauth_flow_available": iid in {
                 "int_gcal", "int_gmail", "int_gdrive", "int_gmeet",
@@ -291,3 +293,146 @@ async def get_playground_agent_status(
         "workspace_id": workspace_id,
         "integrations": integrations,
     }
+
+
+@router.get("/session/{convo_id}/metrics")
+async def get_session_metrics(
+    convo_id: str,
+    workspace_id: str = Depends(get_user_workspace_id),
+):
+    """Returns token usage and latency metrics for a playground session."""
+    if not convo_id or convo_id.lower() in ("undefined", "null", "none"):
+        raise HTTPException(status_code=400, detail="Invalid session_id parameter.")
+    
+    try:
+        # Get conversation to verify workspace
+        convo_ref = firestore_client.collection("conversations").document(convo_id)
+        convo_snap = convo_ref.get()
+        if not convo_snap.exists:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        convo_data = convo_snap.to_dict()
+        if convo_data.get("workspace_id") != workspace_id:
+            raise HTTPException(status_code=403, detail="Unauthorized")
+        
+        agent_id = convo_data.get("agent_id")
+        
+        # Fetch token usage records for this conversation
+        usage_docs = firestore_client.collection("token_usage").where("conversation_id", "==", convo_id).stream()
+        usage_records = [doc.to_dict() for doc in usage_docs]
+        
+        # Aggregate metrics
+        total_input = sum(r.get("input_tokens", 0) for r in usage_records)
+        total_output = sum(r.get("output_tokens", 0) for r in usage_records)
+        total_tokens = sum(r.get("total_tokens", 0) for r in usage_records)
+        total_latency = sum(r.get("latency_ms", 0) for r in usage_records)
+        call_count = len(usage_records)
+        
+        # Estimate cost (rough: $0.0001 per 1K tokens for Gemini Flash)
+        estimated_cost = (total_tokens / 1000) * 0.0001
+        
+        # Get latest timings from traces
+        trace_docs = firestore_client.collection("traces").where("conversation_id", "==", convo_id).order_by("request_start", direction="DESCENDING").limit(1).stream()
+        latest_trace = None
+        for doc in trace_docs:
+            latest_trace = doc.to_dict()
+            break
+        
+        timings = latest_trace.get("timings", {}) if latest_trace else {}
+        
+        return {
+            "conversation_id": convo_id,
+            "agent_id": agent_id,
+            "total_calls": call_count,
+            "input_tokens": total_input,
+            "output_tokens": total_output,
+            "total_tokens": total_tokens,
+            "estimated_cost_usd": round(estimated_cost, 6),
+            "total_latency_ms": total_latency,
+            "avg_latency_ms": round(total_latency / call_count, 2) if call_count > 0 else 0,
+            "breakdown": {
+                "llm_latency_ms": timings.get("llm_ms", 0),
+                "tool_latency_ms": timings.get("tool_execution_ms", 0),
+                "rag_latency_ms": timings.get("rag_ms", 0),
+                "context_build_ms": timings.get("context_build_ms", 0),
+                "intent_classifier_ms": timings.get("intent_classifier_ms", 0),
+            },
+            "records": usage_records[-10:],  # Last 10 records
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        log_error(f"Failed to fetch session metrics: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch metrics")
+
+
+@router.get("/metrics/workspace")
+async def get_workspace_metrics(
+    workspace_id: str = Depends(get_user_workspace_id),
+    limit: int = 100,
+):
+    """Returns aggregated token usage and latency metrics for the workspace."""
+    try:
+        # Fetch recent token usage records for this workspace
+        usage_docs = firestore_client.collection("token_usage").where("workspace_id", "==", workspace_id).order_by("timestamp", direction="DESCENDING").limit(limit).stream()
+        usage_records = [doc.to_dict() for doc in usage_docs]
+        
+        if not usage_records:
+            return {
+                "workspace_id": workspace_id,
+                "total_calls": 0,
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "total_tokens": 0,
+                "estimated_cost_usd": 0,
+                "total_latency_ms": 0,
+                "avg_latency_ms": 0,
+                "by_model": {},
+                "by_agent": {},
+            }
+        
+        # Aggregate metrics
+        total_input = sum(r.get("input_tokens", 0) for r in usage_records)
+        total_output = sum(r.get("output_tokens", 0) for r in usage_records)
+        total_tokens = sum(r.get("total_tokens", 0) for r in usage_records)
+        total_latency = sum(r.get("latency_ms", 0) for r in usage_records)
+        call_count = len(usage_records)
+        
+        # By model
+        by_model = {}
+        for r in usage_records:
+            model = r.get("model", "unknown")
+            if model not in by_model:
+                by_model[model] = {"calls": 0, "input_tokens": 0, "output_tokens": 0, "total_tokens": 0, "latency_ms": 0}
+            by_model[model]["calls"] += 1
+            by_model[model]["input_tokens"] += r.get("input_tokens", 0)
+            by_model[model]["output_tokens"] += r.get("output_tokens", 0)
+            by_model[model]["total_tokens"] += r.get("total_tokens", 0)
+            by_model[model]["latency_ms"] += r.get("latency_ms", 0)
+        
+        # By agent
+        by_agent = {}
+        for r in usage_records:
+            agent = r.get("agent_id", "unknown")
+            if agent not in by_agent:
+                by_agent[agent] = {"calls": 0, "total_tokens": 0, "latency_ms": 0}
+            by_agent[agent]["calls"] += 1
+            by_agent[agent]["total_tokens"] += r.get("total_tokens", 0)
+            by_agent[agent]["latency_ms"] += r.get("latency_ms", 0)
+        
+        estimated_cost = (total_tokens / 1000) * 0.0001
+        
+        return {
+            "workspace_id": workspace_id,
+            "total_calls": call_count,
+            "input_tokens": total_input,
+            "output_tokens": total_output,
+            "total_tokens": total_tokens,
+            "estimated_cost_usd": round(estimated_cost, 6),
+            "total_latency_ms": total_latency,
+            "avg_latency_ms": round(total_latency / call_count, 2) if call_count > 0 else 0,
+            "by_model": by_model,
+            "by_agent": by_agent,
+        }
+    except Exception as e:
+        log_error(f"Failed to fetch workspace metrics: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch metrics")
