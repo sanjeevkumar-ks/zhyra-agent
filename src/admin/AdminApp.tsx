@@ -35,23 +35,12 @@ const queryClient = new QueryClient({
 });
 
 function AdminRoutes() {
-  const { initialize, loading } = useAdminAuthStore();
+  const { initialize } = useAdminAuthStore();
 
   useEffect(() => {
     const unsub = initialize();
     return () => unsub();
   }, [initialize]);
-
-  if (loading) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-[#090D14] text-white">
-        <div className="flex flex-col items-center gap-4">
-          <div className="h-12 w-12 animate-spin rounded-full border-[3px] border-slate-700 border-t-blue-500" />
-          <p className="text-[13.5px] font-medium text-slate-400">Loading Zhyra Admin...</p>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <BrowserRouter>

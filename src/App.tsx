@@ -80,23 +80,12 @@ function DashboardLayout() {
 }
 
 function MainRoutes() {
-  const { initialize, loading } = useAuthStore();
+  const { initialize } = useAuthStore();
 
   useEffect(() => {
     const unsub = initialize();
     return () => unsub();
   }, [initialize]);
-
-  if (loading) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-[#0B0F17] text-white">
-        <div className="flex flex-col items-center gap-4">
-          <div className="h-12 w-12 animate-spin rounded-full border-[3px] border-slate-700 border-t-blue-500" />
-          <p className="text-[13.5px] font-medium text-slate-400">Loading Zhyra AI OS...</p>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <HashRouter>
