@@ -89,12 +89,13 @@
 
   function notify(type, payload) {
     try {
-      frame.contentWindow.postMessage({ source: "zhyra-loader", type: type, payload: payload || {} }, frontendOrigin);
+      frame.contentWindow.postMessage({ source: "zhyra-loader", type: type, payload: payload || {} }, "*");
     } catch (e) {}
   }
 
   triggerBtn.addEventListener("click", function () {
-    notify("toggle");
+    setOpen(!open);
+    notify(open ? "zhyra:opened" : "zhyra:closed");
   });
 
   // 5. postMessage protocol (origin-validated)

@@ -61,7 +61,7 @@ export default function WidgetPage() {
 
   const post = (type: string, payload?: Record<string, unknown>) => {
     try {
-      window.parent.postMessage({ source: "zhyra-widget", type, payload: payload || {} }, window.location.origin);
+      window.parent.postMessage({ source: "zhyra-widget", type, payload: payload || {} }, "*");
     } catch {
       /* parent may not be reachable in standalone preview */
     }
