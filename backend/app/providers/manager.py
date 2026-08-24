@@ -315,16 +315,15 @@ class ProviderManager:
                 log_error(f"Structured AI generation attempt {attempt + 1} failed for {provider.name}", exc=e)
 
         duration = time.time() - start_time
-        log_ai_call(provider.name, model, duration, errors=str(last_error))
+        log_ai_call(provider.name if 'provider' in locals() and provider else "unknown", model, duration, errors=str(last_error))
         from app.ai.tools.models import StructuredLLMResponse
-        from app.providers.gemini import synthesize_contextual_response
         return StructuredLLMResponse(
-            text=synthesize_contextual_response(prompt, system_prompt),
+            text="",
             tool_calls=[],
             model=model,
-            provider=provider.name if 'provider' in locals() and provider else "gemini",
-            finish_reason="STOP",
-            provider_error=str(last_error) if last_error else "Provider fallback",
+            provider=provider.name if 'provider' in locals() and provider else "unknown",
+            finish_reason="ERROR",
+            provider_error=str(last_error) if last_error else "AI provider execution failed",
         )
 
     @classmethod

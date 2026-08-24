@@ -37,8 +37,13 @@ def resolve_agent_system_prompt(agent_data: dict, overrides: dict = None) -> str
     if description:
         parts.append(f"ROLE DESCRIPTION & RESPONSIBILITIES:\n{description}")
         
-    if knowledge_base:
-        parts.append(f"DEPLOYED AGENT KNOWLEDGE BASE:\n{knowledge_base}")
+    parts.append(
+        "[KNOWLEDGE GROUNDING INSTRUCTIONS]\n"
+        "- When <knowledge_context> is provided, answer using the facts from the provided knowledge.\n"
+        "- Do not invent facts, fabricate citations, or claim information exists when it was not retrieved.\n"
+        "- If the answer is not present in the provided knowledge or agent instructions, state clearly and honestly that the information is not available.\n"
+        "- Distinguish unknown information from known information."
+    )
 
     return "\n\n".join(parts)
 

@@ -321,8 +321,14 @@ async def send_widget_message(payload: dict, request: Request, response: Respons
             conversation_id=convo_id, metadata={"text": reply_text},
         )
 
+        if agent_reply.get("terminal_state") == "FAILED" or agent_reply.get("status") == "error":
+            raise HTTPException(
+                status_code=503,
+                detail={"error": {"code": agent_reply.get("error_code", "PROVIDER_ERROR"), "message": reply_text}}
+            )
+
         return {
-            "success": agent_reply.get("terminal_state") != "FAILED",
+            "success": True,
             "message": reply_text,
             "blocks": blocks,
             "actions": actions,

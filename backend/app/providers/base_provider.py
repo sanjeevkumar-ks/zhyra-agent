@@ -1,6 +1,20 @@
 from abc import ABC, abstractmethod
 from typing import AsyncGenerator, List, Dict, Any, Optional
 
+class LLMProviderError(Exception):
+    """Raised when an LLM provider request fails, has invalid/missing credentials, or returns an error response."""
+    def __init__(self, message: str, code: str = "LLM_PROVIDER_ERROR"):
+        super().__init__(message)
+        self.code = code
+
+
+class EmbeddingProviderUnavailableError(Exception):
+    """Raised when embeddings API credentials are not configured or embedding call fails."""
+    def __init__(self, message: str = "EMBEDDING_PROVIDER_UNAVAILABLE"):
+        super().__init__(message)
+        self.code = "EMBEDDING_PROVIDER_UNAVAILABLE"
+
+
 class LLMProvider(ABC):
     @property
     @abstractmethod

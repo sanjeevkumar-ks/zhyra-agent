@@ -80,26 +80,6 @@ class RetrievalContextBuilder:
         except Exception as e:
             log_error("Qdrant query failed in Context Retrieval Builder", exc=e)
 
-        # Fallback Mock RAG is disabled by default: never fabricate knowledge
-        # content. If nothing was retrieved, the LLM gets no RAG context (the
-        # honest answer is "information not available"), rather than invented
-        # citations such as unrelated PDF titles.
-        if not raw_chunks and knowledge_sources and config.enable_fallback_mock_rag:
-            for source in knowledge_sources[:3]:
-                text = ""
-                if "Refund" in source:
-                    text = "Customers can request a full refund within 14 days of purchase. Refunds take 3-5 business days to process on the original payment method."
-                elif "Manual" in source:
-                    text = "To access advanced metrics in the dashboard, navigate to Settings > API and generate a new access token."
-                else:
-                    text = "Standard operational rules apply. Operating hours are 9:00 AM to 5:00 PM EST, Monday through Friday."
-
-                raw_chunks.append({
-                    "title": source,
-                    "text": text,
-                    "score": 0.85
-                })
-
         # Filter by threshold & sort by score
         filtered_chunks = [
             c for c in raw_chunks 
@@ -128,7 +108,6 @@ class RetrievalContextBuilder:
             tokens = ContextBudgetManager.estimate_tokens(formatted)
 
             if accumulated_tokens + tokens > max_tokens:
-                # Truncate remaining if necessary or break
                 break
 
             final_pieces.append(formatted)
@@ -136,5 +115,9 @@ class RetrievalContextBuilder:
             if title not in cited:
                 cited.append(title)
 
-        context_str = "\n\n".join(final_pieces)
+        if not final_pieces:
+            return "", 0, []
+
+        joined_chunks = "\n\n".join(final_pieces)
+        context_str = f"<knowledge_context>\n{joined_chunks}\n</knowledge_context>"
         return context_str, accumulated_tokens, cited

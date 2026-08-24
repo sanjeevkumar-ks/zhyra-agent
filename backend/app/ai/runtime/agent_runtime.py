@@ -314,26 +314,23 @@ class AgentRuntime:
             return res_dict
         except Exception as e:
             log_error(f"LangGraph runtime execution failed for agent {agent_id}", exc=e)
-            from app.ai.context.builder import resolve_agent_system_prompt
-            from app.providers.gemini import synthesize_contextual_response
-            sys_p = resolve_agent_system_prompt(agent_data) if ('agent_data' in locals() and agent_data) else ""
-            err_msg = synthesize_contextual_response(query, sys_p)
+            err_msg = f"Service Connection Failure: {str(e)}" if str(e) else "Service Connection Failure: AI provider unavailable."
             return {
                 "text": err_msg,
                 "message": err_msg,
                 "blocks": [{"type": "text", "data": {"text": err_msg}}],
-                "intent": "General Inquiry",
-                "confidence": 95,
+                "intent": "Error",
+                "confidence": 0,
                 "knowledge_used": [],
                 "memory_recalled": [],
                 "actions": [],
-                "status": "active",
+                "status": "error",
                 "trace_id": trace_id,
                 "tool_events": [],
                 "action_state": [],
-                "terminal_state": "COMPLETED",
-                "execution_status": "completed",
-                "error_code": "",
+                "terminal_state": "FAILED",
+                "execution_status": "failed",
+                "error_code": "PROVIDER_ERROR",
                 "timings": {"total_ms": int((time.time() - t0) * 1000)},
             }
 

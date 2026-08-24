@@ -1,99 +1,12 @@
 import json
+import os
 import time
 from typing import AsyncGenerator, List, Dict, Any, Optional
 import httpx
-from app.providers.base_provider import LLMProvider
+from app.providers.base_provider import LLMProvider, LLMProviderError, EmbeddingProviderUnavailableError
 from app.utils.logger import log_error, log_info
 
-def synthesize_contextual_response(prompt: str = "", system_prompt: str = "") -> str:
-    """Generates a dynamic, context-aware AI response based on the deployed agent's full persona, system prompt, knowledge base, and query."""
-    full_text = f"{system_prompt or ''}\n{prompt or ''}"
-    
-    user_query = ""
-    lines = [l.strip() for l in full_text.split("\n") if l.strip()]
-    for l in reversed(lines):
-        if l.startswith("Customer:") or l.startswith("User:") or l.startswith("Query:"):
-            user_query = l.split(":", 1)[1].strip()
-            break
-    if not user_query and lines:
-        user_query = lines[-1]
-
-    agent_name = "Zhyra AI Assistant"
-    agent_role = "AI Assistant"
-    agent_purpose = ""
-    
-    if "You are " in (system_prompt or ""):
-        try:
-            name_part = system_prompt.split("You are ")[1].split(".")[0].strip()
-            if "," in name_part:
-                agent_name = name_part.split(",")[0].strip()
-            else:
-                agent_name = name_part
-        except Exception:
-            pass
-
-    if "role of " in (system_prompt or ""):
-        try:
-            agent_role = system_prompt.split("role of ")[1].split(".")[0].strip()
-        except Exception:
-            pass
-
-    if "PRIMARY GOAL & PURPOSE:" in (system_prompt or ""):
-        try:
-            agent_purpose = system_prompt.split("PRIMARY GOAL & PURPOSE:")[1].split("\n\n")[0].strip()
-        except Exception:
-            pass
-
-    query_lower = user_query.lower()
-    query_terms = [w.lower() for w in user_query.split() if len(w) > 2]
-    matching_lines = []
-    
-    for line in lines:
-        l_lower = line.lower()
-        if (
-            any(term in l_lower for term in query_terms)
-            and not line.startswith("Customer:")
-            and not line.startswith("User:")
-            and not line.startswith("Query:")
-            and not line.startswith("System:")
-            and not line.startswith("You are ")
-            and not line.startswith("Conversational History:")
-            and line.strip().lower() != user_query.strip().lower()
-        ):
-            matching_lines.append(line)
-
-    if matching_lines:
-        snippet = "\n".join(matching_lines[:4])
-        return f"Hello! As **{agent_name}** ({agent_role}), here is what I found in my knowledge base:\n\n{snippet}"
-
-    if "sanjeev" in query_lower:
-        s_lines = [
-            l for l in lines 
-            if "sanjeev" in l.lower() 
-            and not l.lower().startswith("customer:")
-            and not l.lower().startswith("user:") 
-            and not l.lower().startswith("query:")
-            and not l.lower().startswith("system:")
-            and not l.lower().startswith("you are ")
-            and l.strip().lower() != user_query.strip().lower()
-        ]
-        if s_lines:
-            return f"Hello! I am **{agent_name}** ({agent_role}). Here is the information recorded in my knowledge base regarding Sanjeev:\n\n" + "\n".join(s_lines[:3])
-        return f"I am **{agent_name}** ({agent_role}). I checked my deployed knowledge base for 'Sanjeev'. Currently, there are no specific profile notes or knowledge documents stored about Sanjeev in my workspace.{' My primary mandate is: ' + agent_purpose if agent_purpose else ''} Please let me know how I can assist you!"
-
-    if any(k in query_lower for k in ["who are you", "what can you do", "help", "who you are", "identity", "what is your role", "purpose"]):
-        resp = f"Hello! I am **{agent_name}**, operating as a **{agent_role}**."
-        if agent_purpose:
-            resp += f"\n\n**My Primary Purpose**: {agent_purpose}"
-        resp += "\n\nHow can I help you today?"
-        return resp
-
-    if user_query:
-        if agent_purpose:
-            return f"Hello! I am **{agent_name}** ({agent_role}). My primary mandate is to **{agent_purpose}**.\n\nRegarding *\"{user_query}\"*: I am configured to help you accomplish this. Please let me know the specific details or actions you would like me to handle!"
-        return f"Hello! I am **{agent_name}** ({agent_role}). I am ready to help you with *\"{user_query}\"*. How would you like us to proceed?"
-
-    return f"Hello! I am **{agent_name}** ({agent_role}). How can I assist you with your tasks today?"
+EXECUTION_MODE = os.getenv("EXECUTION_MODE", "LIVE").upper()
 
 
 class GeminiProvider(LLMProvider):
@@ -106,7 +19,15 @@ class GeminiProvider(LLMProvider):
 
     @property
     def available_models(self) -> List[str]:
-        return ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-3.5-flash", "gemini-3.6-flash", "gemini-flash-latest", "gemini-pro-latest"]
+        return [
+            "gemini-1.5-flash",
+            "gemini-1.5-pro",
+            "gemini-2.0-flash",
+            "gemini-2.5-flash",
+            "gemini-2.5-pro",
+            "gemini-flash-latest",
+            "gemini-pro-latest",
+        ]
 
     @property
     def supports_streaming(self) -> bool:
@@ -148,7 +69,11 @@ class GeminiProvider(LLMProvider):
                 res = await client.get(url)
                 if res.status_code == 200:
                     data = res.json()
-                    models = [m["name"].split("/")[-1] for m in data.get("models", []) if "generateContent" in m.get("supportedGenerationMethods", [])]
+                    models = [
+                        m["name"].split("/")[-1]
+                        for m in data.get("models", [])
+                        if "generateContent" in m.get("supportedGenerationMethods", [])
+                    ]
                     return models if models else self.available_models
         except Exception as e:
             log_error("Error listing Gemini models via API", exc=e)
@@ -183,20 +108,19 @@ class GeminiProvider(LLMProvider):
             return "gemini-1.5-flash"
         if "/" in model:
             model = model.split("/")[-1]
-        valid_models = {
+
+        valid_models = set(self.available_models) | {
             "gemini-1.5-flash",
             "gemini-1.5-pro",
             "gemini-2.0-flash",
             "gemini-2.0-flash-lite",
             "gemini-2.0-pro-exp-02-05",
-            "gemini-flash-latest",
-            "gemini-pro-latest",
         }
         if model in valid_models:
             return model
-        if "pro" in model.lower():
-            return "gemini-1.5-pro"
-        return "gemini-1.5-flash"
+
+        log_error(f"Invalid or unsupported model requested: '{model}'")
+        raise LLMProviderError(f"INVALID_MODEL: The requested model '{model}' is invalid or not supported.", code="INVALID_MODEL")
 
     async def generate_text(
         self,
@@ -205,14 +129,14 @@ class GeminiProvider(LLMProvider):
         model: str = None,
         temperature: float = 0.7,
         max_tokens: int = 1000,
-        functions: List[Dict[str, Any]] = None
+        functions: List[Dict[str, Any]] = None,
     ) -> str:
         model = self._normalize_model(model)
 
-        # Safe fallback if API key is missing or dummy.
         if not self._has_real_key():
-            log_info("Gemini provider running without API key. Returning contextual message.")
-            return synthesize_contextual_response(prompt, system_prompt)
+            if EXECUTION_MODE == "MOCK":
+                return "MOCK_RESPONSE: Gemini API key is missing (MOCK_MODE=true)."
+            raise LLMProviderError("GEMINI_API_KEY_NOT_CONFIGURED: Gemini API key is not configured for this workspace.", code="GEMINI_API_KEY_NOT_CONFIGURED")
 
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={self.api_key}"
 
@@ -222,7 +146,7 @@ class GeminiProvider(LLMProvider):
             "generationConfig": {
                 "temperature": temperature,
                 "maxOutputTokens": max_tokens,
-            }
+            },
         }
         if system_prompt:
             payload["systemInstruction"] = {"parts": [{"text": system_prompt}]}
@@ -235,7 +159,7 @@ class GeminiProvider(LLMProvider):
                 res = await client.post(url, json=payload, headers={"Content-Type": "application/json"})
                 if res.status_code != 200:
                     log_error(f"Gemini API returned status {res.status_code}: {res.text}")
-                    return synthesize_contextual_response(prompt, system_prompt)
+                    raise LLMProviderError(f"Gemini API returned status {res.status_code}: {res.text}", code=f"HTTP_{res.status_code}")
 
                 data = res.json()
                 parts = self._extract_parts(data)
@@ -243,15 +167,21 @@ class GeminiProvider(LLMProvider):
                 calls = self._parts_to_function_calls(parts)
                 if calls:
                     fc = calls[0]
-                    fname = fc.get("name") or "GoogleCalendar.create_event"
+                    fname = fc.get("name") or ""
                     fargs = fc.get("args") or {}
                     log_info(f"[Gemini Provider] Native functionCall triggered: selected_tool_name={fname} tool_arguments={fargs}")
                     return f'TOOL_CALL:{{"tool": "{fname}", "args": {json.dumps(fargs)}}}'
 
-                return self._parts_to_text(parts) or synthesize_contextual_response(prompt, system_prompt)
+                text = self._parts_to_text(parts)
+                if not text and not calls:
+                    raise LLMProviderError("Gemini API returned an empty response.", code="EMPTY_RESPONSE")
+
+                return text
         except Exception as e:
+            if isinstance(e, LLMProviderError):
+                raise
             log_error("Gemini API execution failed", exc=e)
-            return synthesize_contextual_response(prompt, system_prompt)
+            raise LLMProviderError(f"Gemini API execution failed: {str(e)}", code="GEMINI_EXECUTION_FAILED")
 
     async def generate_structured(
         self,
@@ -266,14 +196,34 @@ class GeminiProvider(LLMProvider):
         """Returns a ``StructuredLLMResponse`` using Gemini native functionCall parts."""
         from app.ai.tools.models import StructuredLLMResponse, ToolCall
 
-        model = self._normalize_model(model)
+        try:
+            model = self._normalize_model(model)
+        except LLMProviderError as err:
+            return StructuredLLMResponse(
+                text="",
+                tool_calls=[],
+                model=model or "gemini-1.5-flash",
+                provider=self.name,
+                finish_reason="ERROR",
+                provider_error=str(err),
+            )
 
         if not self._has_real_key():
+            if EXECUTION_MODE == "MOCK":
+                return StructuredLLMResponse(
+                    text="MOCK_RESPONSE: Gemini API key is missing.",
+                    tool_calls=[],
+                    model=model,
+                    provider=self.name,
+                    finish_reason="STOP",
+                )
             return StructuredLLMResponse(
-                text=synthesize_contextual_response(prompt, system_prompt),
+                text="",
+                tool_calls=[],
                 model=model,
                 provider=self.name,
-                finish_reason="STOP",
+                finish_reason="ERROR",
+                provider_error="GEMINI_API_KEY_NOT_CONFIGURED",
             )
 
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={self.api_key}"
@@ -284,7 +234,7 @@ class GeminiProvider(LLMProvider):
             "generationConfig": {
                 "temperature": temperature,
                 "maxOutputTokens": max_tokens,
-            }
+            },
         }
         if system_prompt:
             payload["systemInstruction"] = {"parts": [{"text": system_prompt}]}
@@ -298,12 +248,12 @@ class GeminiProvider(LLMProvider):
                 if res.status_code != 200:
                     log_error(f"Gemini API returned status {res.status_code}: {res.text}")
                     return StructuredLLMResponse(
-                        text=synthesize_contextual_response(prompt, system_prompt),
+                        text="",
                         tool_calls=[],
                         model=model,
                         provider=self.name,
-                        finish_reason="STOP",
-                        provider_error=f"Gemini API returned status {res.status_code}",
+                        finish_reason="ERROR",
+                        provider_error=f"Gemini API returned status {res.status_code}: {res.text}",
                     )
 
                 data = res.json()
@@ -318,7 +268,7 @@ class GeminiProvider(LLMProvider):
                         f"model={model} finish_reason={finish_reason} candidates=0"
                     )
                     return StructuredLLMResponse(
-                        text=synthesize_contextual_response(prompt, system_prompt),
+                        text="",
                         tool_calls=[],
                         model=model,
                         provider=self.name,
@@ -344,17 +294,19 @@ class GeminiProvider(LLMProvider):
                                 merged[item[0]] = item[1]
                         fargs = merged
                     log_info(f"[Gemini Provider] Structured functionCall: name={fname} args={fargs}")
-                    tool_calls.append(ToolCall(
-                        id=f"{tool_call_id_prefix}{idx}",
-                        name=fname,
-                        action="execute",
-                        args=fargs,
-                        raw_name=fname,
-                    ))
+                    tool_calls.append(
+                        ToolCall(
+                            id=f"{tool_call_id_prefix}{idx}",
+                            name=fname,
+                            action="execute",
+                            args=fargs,
+                            raw_name=fname,
+                        )
+                    )
 
                 latency_ms = int((time.time() - start) * 1000)
                 return StructuredLLMResponse(
-                    text=text or synthesize_contextual_response(prompt, system_prompt),
+                    text=text,
                     tool_calls=tool_calls,
                     model=model,
                     provider=self.name,
@@ -364,11 +316,11 @@ class GeminiProvider(LLMProvider):
         except Exception as e:
             log_error("Gemini structured generation failed", exc=e)
             return StructuredLLMResponse(
-                text=synthesize_contextual_response(prompt, system_prompt),
+                text="",
                 tool_calls=[],
                 model=model,
                 provider=self.name,
-                finish_reason="STOP",
+                finish_reason="ERROR",
                 provider_error=str(e),
             )
 
@@ -379,16 +331,15 @@ class GeminiProvider(LLMProvider):
         model: str = None,
         temperature: float = 0.7,
         max_tokens: int = 1000,
-        functions: List[Dict[str, Any]] = None
+        functions: List[Dict[str, Any]] = None,
     ) -> AsyncGenerator[str, None]:
-        model = model or "gemini-3.5-flash"
-        if "/" in model:
-            model = model.split("/")[-1]
+        model = self._normalize_model(model)
 
         if not self._has_real_key():
-            log_info("Gemini provider streaming without API key. Yielding neutral message.")
-            yield "I'm ready to help. (Gemini API key is not configured for this workspace.)"
-            return
+            if EXECUTION_MODE == "MOCK":
+                yield "MOCK_RESPONSE: Gemini API key is missing."
+                return
+            raise LLMProviderError("GEMINI_API_KEY_NOT_CONFIGURED: Gemini API key is not configured for this workspace.", code="GEMINI_API_KEY_NOT_CONFIGURED")
 
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:streamGenerateContent?alt=sse&key={self.api_key}"
         contents = [{"parts": [{"text": prompt}]}]
@@ -397,7 +348,7 @@ class GeminiProvider(LLMProvider):
             "generationConfig": {
                 "temperature": temperature,
                 "maxOutputTokens": max_tokens,
-            }
+            },
         }
         if system_prompt:
             payload["systemInstruction"] = {"parts": [{"text": system_prompt}]}
@@ -408,14 +359,13 @@ class GeminiProvider(LLMProvider):
             async with httpx.AsyncClient(timeout=60.0) as client:
                 async with client.stream("POST", url, json=payload, headers={"Content-Type": "application/json"}) as response:
                     if response.status_code != 200:
-                        raise Exception(f"Gemini API returned status {response.status_code}")
+                        raise LLMProviderError(f"Gemini API returned status {response.status_code}")
                     async for chunk in response.aiter_text():
-                        # Gemini SSE format: "data: {json}\n\n" per chunk
                         for line in chunk.splitlines():
                             line = line.strip()
                             if not line.startswith("data:"):
                                 continue
-                            raw = line[len("data:"):].strip()
+                            raw = line[len("data:") :].strip()
                             if not raw:
                                 continue
                             try:
@@ -430,23 +380,29 @@ class GeminiProvider(LLMProvider):
                                 yield text_part
         except Exception as e:
             log_error("Gemini API streaming execution failed", exc=e)
-            yield f"\n[Streaming error: {str(e)}]"
+            raise LLMProviderError(f"Gemini streaming failed: {str(e)}")
 
     async def embeddings(self, text: str) -> List[float]:
         if not self._has_real_key():
-            # Mock 3072 vector for offline dev
-            return [0.1] * 3072
+            if EXECUTION_MODE == "MOCK":
+                return [0.1] * 3072
+            raise EmbeddingProviderUnavailableError("EMBEDDING_PROVIDER_UNAVAILABLE: Gemini API key is not configured for this workspace.")
 
         url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent?key={self.api_key}"
         payload = {
             "model": "models/gemini-embedding-001",
-            "content": {"parts": [{"text": text}]}
+            "content": {"parts": [{"text": text}]},
         }
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
                 res = await client.post(url, json=payload)
                 if res.status_code == 200:
-                    return res.json()["embedding"]["values"]
+                    data = res.json()
+                    return data["embedding"]["values"]
+                log_error(f"Gemini embedding API returned status {res.status_code}: {res.text}")
+                raise EmbeddingProviderUnavailableError(f"EMBEDDING_PROVIDER_UNAVAILABLE: Gemini API status {res.status_code}")
         except Exception as e:
-            log_error("Gemini embedding api failed", exc=e)
-        return [0.0] * 3072
+            if isinstance(e, EmbeddingProviderUnavailableError):
+                raise
+            log_error("Gemini embedding API call failed", exc=e)
+            raise EmbeddingProviderUnavailableError(f"EMBEDDING_PROVIDER_UNAVAILABLE: {str(e)}")
