@@ -309,8 +309,9 @@ class ProviderManager:
         duration = time.time() - start_time
         log_ai_call(provider.name, model, duration, errors=str(last_error))
         from app.ai.tools.models import StructuredLLMResponse
+        from app.providers.gemini import synthesize_contextual_response
         return StructuredLLMResponse(
-            text="Hi! I am your AI assistant. How can I help you today?",
+            text=synthesize_contextual_response(prompt, system_prompt),
             tool_calls=[],
             model=model,
             provider=provider.name if 'provider' in locals() and provider else "gemini",

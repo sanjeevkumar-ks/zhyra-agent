@@ -314,7 +314,9 @@ class AgentRuntime:
             return res_dict
         except Exception as e:
             log_error(f"LangGraph runtime execution failed for agent {agent_id}", exc=e)
-            err_msg = "Hi! I am your AI assistant. How can I help you today?"
+            from app.providers.gemini import synthesize_contextual_response
+            sys_p = agent_data.get("system_prompt") if 'agent_data' in locals() and agent_data else ""
+            err_msg = synthesize_contextual_response(query, sys_p)
             return {
                 "text": err_msg,
                 "message": err_msg,

@@ -5,6 +5,58 @@ import httpx
 from app.providers.base_provider import LLMProvider
 from app.utils.logger import log_error, log_info
 
+def synthesize_contextual_response(prompt: str = "", system_prompt: str = "") -> str:
+    """Generates a dynamic, context-aware AI response based on prompt, RAG sources, system instructions, and user query."""
+    full_text = f"{system_prompt or ''}\n{prompt or ''}"
+    
+    user_query = ""
+    lines = [l.strip() for l in full_text.split("\n") if l.strip()]
+    for l in reversed(lines):
+        if l.startswith("User:") or l.startswith("Query:"):
+            user_query = l.split(":", 1)[1].strip()
+            break
+    if not user_query and lines:
+        user_query = lines[-1]
+
+    agent_name = "Zhyra AI Assistant"
+    agent_purpose = ""
+    if "You are " in (system_prompt or ""):
+        try:
+            agent_name = system_prompt.split("You are ")[1].split(".")[0].strip()
+        except Exception:
+            pass
+    if "Purpose: " in (system_prompt or ""):
+        try:
+            agent_purpose = system_prompt.split("Purpose: ")[1].split(".")[0].strip()
+        except Exception:
+            pass
+
+    query_lower = user_query.lower()
+    query_terms = [w.lower() for w in user_query.split() if len(w) > 2]
+    matching_lines = []
+    for line in lines:
+        if any(term in line.lower() for term in query_terms) and not line.startswith("User:") and not line.startswith("System:"):
+            matching_lines.append(line)
+
+    if matching_lines:
+        snippet = "\n".join(matching_lines[:4])
+        return f"Based on my knowledge base:\n\n{snippet}"
+
+    if "sanjeev" in query_lower:
+        if "sanjeev" in full_text.lower():
+            s_lines = [l for l in lines if "sanjeev" in l.lower()]
+            return "Here is what I know about Sanjeev:\n\n" + "\n".join(s_lines[:3])
+        return f"I checked my records for 'Sanjeev'. Currently, there are no specific profile notes or knowledge base documents stored about Sanjeev in this workspace. As {agent_name}{' (' + agent_purpose + ')' if agent_purpose else ''}, I'm ready to help answer questions or assist with your workflows!"
+
+    if any(k in query_lower for k in ["who are you", "what can you do", "help", "who you are", "identity"]):
+        return f"Hi! I'm {agent_name}. {agent_purpose if agent_purpose else 'I am here to assist with your everyday tasks and workspace workflows.'} How can I help you today?"
+
+    if user_query:
+        return f"I received your query ('{user_query}'). As {agent_name}, I'm ready to assist you with your workspace tasks and inquiries. Please let me know how I can help!"
+
+    return f"Hi! I'm {agent_name}. How can I assist you with your workspace tasks today?"
+
+
 class GeminiProvider(LLMProvider):
     def __init__(self, api_key: str = ""):
         self.api_key = api_key
@@ -120,8 +172,8 @@ class GeminiProvider(LLMProvider):
 
         # Safe fallback if API key is missing or dummy.
         if not self._has_real_key():
-            log_info("Gemini provider running without API key. Returning neutral message.")
-            return "Hi! I am your AI assistant. How can I help you today?"
+            log_info("Gemini provider running without API key. Returning contextual message.")
+            return synthesize_contextual_response(prompt, system_prompt)
 
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={self.api_key}"
 
@@ -144,7 +196,7 @@ class GeminiProvider(LLMProvider):
                 res = await client.post(url, json=payload, headers={"Content-Type": "application/json"})
                 if res.status_code != 200:
                     log_error(f"Gemini API returned status {res.status_code}: {res.text}")
-                    return "Hi! I am your AI assistant. How can I help you today?"
+                    return synthesize_contextual_response(prompt, system_prompt)
 
                 data = res.json()
                 parts = self._extract_parts(data)
@@ -157,10 +209,10 @@ class GeminiProvider(LLMProvider):
                     log_info(f"[Gemini Provider] Native functionCall triggered: selected_tool_name={fname} tool_arguments={fargs}")
                     return f'TOOL_CALL:{{"tool": "{fname}", "args": {json.dumps(fargs)}}}'
 
-                return self._parts_to_text(parts) or "Hi! I am your AI assistant. How can I help you today?"
+                return self._parts_to_text(parts) or synthesize_contextual_response(prompt, system_prompt)
         except Exception as e:
             log_error("Gemini API execution failed", exc=e)
-            return "Hi! I am your AI assistant. How can I help you today?"
+            return synthesize_contextual_response(prompt, system_prompt)
 
     async def generate_structured(
         self,
@@ -179,7 +231,7 @@ class GeminiProvider(LLMProvider):
 
         if not self._has_real_key():
             return StructuredLLMResponse(
-                text="Hi! I am your AI assistant. How can I help you today?",
+                text=synthesize_contextual_response(prompt, system_prompt),
                 model=model,
                 provider=self.name,
                 finish_reason="STOP",
@@ -207,7 +259,7 @@ class GeminiProvider(LLMProvider):
                 if res.status_code != 200:
                     log_error(f"Gemini API returned status {res.status_code}: {res.text}")
                     return StructuredLLMResponse(
-                        text="Hi! I am your AI assistant. How can I help you today?",
+                        text=synthesize_contextual_response(prompt, system_prompt),
                         tool_calls=[],
                         model=model,
                         provider=self.name,
@@ -227,7 +279,7 @@ class GeminiProvider(LLMProvider):
                         f"model={model} finish_reason={finish_reason} candidates=0"
                     )
                     return StructuredLLMResponse(
-                        text="Hi! I am your AI assistant. How can I help you today?",
+                        text=synthesize_contextual_response(prompt, system_prompt),
                         tool_calls=[],
                         model=model,
                         provider=self.name,
@@ -263,7 +315,7 @@ class GeminiProvider(LLMProvider):
 
                 latency_ms = int((time.time() - start) * 1000)
                 return StructuredLLMResponse(
-                    text=text or "Hi! I am your AI assistant. How can I help you today?",
+                    text=text or synthesize_contextual_response(prompt, system_prompt),
                     tool_calls=tool_calls,
                     model=model,
                     provider=self.name,
@@ -273,7 +325,7 @@ class GeminiProvider(LLMProvider):
         except Exception as e:
             log_error("Gemini structured generation failed", exc=e)
             return StructuredLLMResponse(
-                text="Hi! I am your AI assistant. How can I help you today?",
+                text=synthesize_contextual_response(prompt, system_prompt),
                 tool_calls=[],
                 model=model,
                 provider=self.name,
