@@ -1,17 +1,23 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Plus, Search, SlidersHorizontal, Trash2, X } from "lucide-react";
+import { Check, Plus, Search, SlidersHorizontal, Sparkles, Trash2, X } from "lucide-react";
 import { apiClient } from "../lib/apiClient";
 import { appRoute } from "../lib/routes";
-import { AskZhyraChip, Avatar, Badge, Button, PageHeader, StatusDot } from "../components/ui";
+import { Avatar, Badge, Button, PageHeader, StatusDot } from "../components/ui";
+import { AGENT_TEMPLATES, type AgentTemplate } from "../lib/agentTemplates";
+import { cn } from "../utils/cn";
 
 export default function Agents() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [filter, setFilter] = useState<"all" | "active" | "paused">("all");
   const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [isTemplateModalOpen, setIsTemplateModalOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<any | null>(null);
+
+  // Selected Template State
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
 
   // Form State
   const [name, setName] = useState("");
@@ -20,6 +26,11 @@ export default function Agents() {
   const [role, setRole] = useState("");
   const [goals, setGoals] = useState("");
   const [capabilities, setCapabilities] = useState("");
+  const [avatarGradient, setAvatarGradient] = useState("from-[#2F6BFF] to-[#8B7CF6]");
+  const [initials, setInitials] = useState("AI");
+  const [systemPrompt, setSystemPrompt] = useState("");
+  const [defaultProvider, setDefaultProvider] = useState("gemini");
+  const [defaultModel, setDefaultModel] = useState("gemini-3.5-flash");
 
   // API Queries
   const { data: agents = [], isLoading } = useQuery({
@@ -27,12 +38,52 @@ export default function Agents() {
     queryFn: () => apiClient.get<any[]>("/api/agents"),
   });
 
+  const applyTemplate = (tpl: AgentTemplate) => {
+    setSelectedTemplateId(tpl.id);
+    setName(tpl.name);
+    setPurpose(tpl.purpose);
+    setRole(tpl.role);
+    setPersonality(tpl.personality);
+    setGoals(tpl.goals.join(", "));
+    setCapabilities(tpl.capabilities.join(", "));
+    setAvatarGradient(tpl.avatar_gradient);
+    setInitials(tpl.initials);
+    setSystemPrompt(tpl.system_prompt);
+    setDefaultProvider(tpl.default_provider);
+    setDefaultModel(tpl.default_model);
+  };
+
+  const handleSelectTemplateFromModal = (tpl: AgentTemplate) => {
+    applyTemplate(tpl);
+    setIsTemplateModalOpen(false);
+    setIsCreateOpen(true);
+  };
+
+  const handleOpenCreateWithTemplate = (tpl?: AgentTemplate) => {
+    if (tpl) {
+      applyTemplate(tpl);
+    } else {
+      setSelectedTemplateId(null);
+      setName("");
+      setPurpose("");
+      setPersonality("");
+      setRole("");
+      setGoals("");
+      setCapabilities("");
+      setAvatarGradient("from-[#2F6BFF] to-[#8B7CF6]");
+      setInitials("AI");
+      setSystemPrompt("");
+    }
+    setIsCreateOpen(true);
+  };
+
   // Create Agent Mutation
   const createAgentMutation = useMutation({
     mutationFn: (newAgent: any) => apiClient.post<any>("/api/agents", newAgent),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["agents"] });
       setIsCreateOpen(false);
+      setSelectedTemplateId(null);
       setName("");
       setPurpose("");
       setPersonality("");
@@ -55,22 +106,16 @@ export default function Agents() {
     e.preventDefault();
     if (!name || !purpose) return;
 
-    const initials = name
-      .split(" ")
-      .map((n) => n[0])
-      .filter(Boolean)
-      .join("")
-      .toUpperCase()
-      .slice(0, 2) || "AI";
-
-    const gradients = [
-      "from-[#2F6BFF] to-[#8B7CF6]",
-      "from-[#FF5E62] to-[#FF9966]",
-      "from-[#11998e] to-[#38ef7d]",
-      "from-[#FC466B] to-[#3F5EFB]",
-      "from-[#F9D423] to-[#FF4E50]",
-    ];
-    const avatar_gradient = gradients[Math.floor(Math.random() * gradients.length)];
+    const agentInitials =
+      initials ||
+      name
+        .split(" ")
+        .map((n) => n[0])
+        .filter(Boolean)
+        .join("")
+        .toUpperCase()
+        .slice(0, 2) ||
+      "AI";
 
     createAgentMutation.mutate({
       name,
@@ -80,8 +125,13 @@ export default function Agents() {
       goals: goals.split(",").map((g) => g.trim()).filter(Boolean),
       capabilities: capabilities.split(",").map((c) => c.trim()).filter(Boolean),
       status: "active",
-      initials,
-      avatar_gradient,
+      initials: agentInitials,
+      avatar_gradient: avatarGradient,
+      overrides: {
+        provider: defaultProvider,
+        model: defaultModel,
+        system_prompt: systemPrompt || `You are ${name}, ${purpose}.`,
+      },
     });
   };
 
@@ -94,12 +144,18 @@ export default function Agents() {
         title="Agents"
         description="Every AI employee working across your business — configure directives, connect tools, and monitor activity."
         actions={
-          <>
-            <AskZhyraChip label="Ask Zhyra which agent to build next" />
-            <Button icon={<Plus size={15} />} onClick={() => setIsCreateOpen(true)}>
+          <div className="flex flex-wrap items-center gap-2.5">
+            <Button
+              variant="outline"
+              icon={<Sparkles size={15} className="text-violet" />}
+              onClick={() => setIsTemplateModalOpen(true)}
+            >
+              Browse Templates
+            </Button>
+            <Button icon={<Plus size={15} />} onClick={() => handleOpenCreateWithTemplate()}>
               Create Agent
             </Button>
-          </>
+          </div>
         }
       />
 
@@ -221,7 +277,7 @@ export default function Agents() {
           ))}
 
           <button
-            onClick={() => setIsCreateOpen(true)}
+            onClick={() => handleOpenCreateWithTemplate()}
             className="flex min-h-[260px] flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-line text-ink-faint transition-colors hover:border-accent/40 hover:text-accent"
           >
             <span className="flex h-11 w-11 items-center justify-center rounded-full border border-dashed border-current">
@@ -256,36 +312,163 @@ export default function Agents() {
         </div>
       )}
 
+      {/* Browse Templates Modal */}
+      {isTemplateModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4 sm:p-6 overflow-y-auto">
+          <div className="w-full max-w-4xl max-h-[85vh] bg-surface border border-line rounded-2xl p-6 shadow-soft-lg flex flex-col gap-6 animate-scale-in overflow-hidden">
+            <div className="flex items-center justify-between border-b border-line pb-4 shrink-0">
+              <div>
+                <h3 className="text-[18px] font-semibold text-ink flex items-center gap-2">
+                  <Sparkles size={18} className="text-violet" /> Agent Templates Gallery
+                </h3>
+                <p className="text-[13px] text-ink-soft mt-0.5">
+                  Select a predefined AI agent personality (Tara, Kayal, Mitran, Agan, Mathi) to instantly jumpstart creation.
+                </p>
+              </div>
+              <button
+                onClick={() => setIsTemplateModalOpen(false)}
+                className="p-1.5 hover:bg-canvas-alt rounded-lg text-ink-soft hover:text-ink transition-colors"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="overflow-y-auto pr-1 space-y-4 flex-1">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {AGENT_TEMPLATES.map((tpl) => (
+                  <div
+                    key={tpl.id}
+                    className="flex flex-col justify-between rounded-xl border border-line bg-canvas-alt/30 p-5 space-y-4 transition-all hover:border-accent/40 hover:bg-surface hover:shadow-soft"
+                  >
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <Avatar initials={tpl.initials} gradient={tpl.avatar_gradient} size={40} />
+                          <div>
+                            <h4 className="text-[16px] font-semibold text-ink">{tpl.name}</h4>
+                            <p className="text-[12px] font-medium text-ink-faint">{tpl.purpose}</p>
+                          </div>
+                        </div>
+                        {/* <Badge tone={tpl.badgeTone}>{tpl.name}</Badge> */}
+                      </div>
+
+                      <p className="text-[12.5px] text-ink-soft leading-relaxed">
+                        <strong className="text-ink font-medium">Role: </strong> {tpl.role}
+                      </p>
+
+                      <div className="rounded-lg border border-line/60 bg-surface/50 p-2.5 text-[12px] text-ink-soft space-y-1">
+                        <p className="font-semibold text-ink text-[11.5px] uppercase tracking-wider">Personality</p>
+                        <p className="italic text-[12px]">{tpl.personality}</p>
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <p className="text-[11.5px] font-medium text-ink-faint uppercase tracking-wider">Key Capabilities</p>
+                        <div className="flex flex-wrap gap-1">
+                          {tpl.capabilities.map((c) => (
+                            <Badge key={c} tone="neutral" className="text-[11px] py-0.5 px-2">
+                              {c}
+                            </Badge>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="pt-3 border-t border-line">
+                      <Button
+                        className="w-full justify-center"
+                        icon={<Sparkles size={14} />}
+                        onClick={() => handleSelectTemplateFromModal(tpl)}
+                      >
+                        Use {tpl.name} Template
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Sliding Creation Drawer */}
       {isCreateOpen && (
         <div className="fixed inset-0 z-50 flex justify-end bg-black/20 backdrop-blur-xs">
-          <div className="w-full max-w-md bg-canvas border-l border-line p-6 shadow-soft-lg flex flex-col gap-6 overflow-y-auto animate-slide-in">
+          <div className="w-full max-w-lg bg-canvas border-l border-line p-6 shadow-soft-lg flex flex-col gap-6 overflow-y-auto animate-slide-in">
             <div className="flex items-center justify-between border-b border-line pb-4">
-              <h3 className="text-[16px] font-semibold text-ink">Create New AI Employee</h3>
+              <div>
+                <h3 className="text-[16px] font-semibold text-ink">Create New AI Employee</h3>
+                <p className="text-[12px] text-ink-faint">Select a predefined template or build custom.</p>
+              </div>
               <button onClick={() => setIsCreateOpen(false)} className="p-1.5 hover:bg-canvas-alt rounded-lg text-ink-soft hover:text-ink">
                 <X size={16} />
               </button>
             </div>
+
+            {/* Template Selector Chips */}
+            {/* <div className="space-y-2.5">
+              <label className="text-[11.5px] font-semibold uppercase tracking-wider text-ink-faint">
+                Select Predefined Template
+              </label>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {AGENT_TEMPLATES.map((tpl) => (
+                  <button
+                    key={tpl.id}
+                    type="button"
+                    onClick={() => applyTemplate(tpl)}
+                    className={cn(
+                      "flex items-center gap-2.5 rounded-xl border p-2.5 text-left transition-all",
+                      selectedTemplateId === tpl.id
+                        ? "border-accent bg-accent-soft/30 shadow-xs"
+                        : "border-line bg-surface hover:bg-canvas-alt"
+                    )}
+                  >
+                    <Avatar initials={tpl.initials} gradient={tpl.avatar_gradient} size={32} />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between">
+                        <p className="text-[13px] font-semibold text-ink truncate">{tpl.name}</p>
+                        {selectedTemplateId === tpl.id && (
+                          <Check size={13} className="text-accent shrink-0" />
+                        )}
+                      </div>
+                      <p className="text-[11px] text-ink-soft truncate">{tpl.purpose}</p>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div> */}
+
+            {/* <div className="h-px bg-line" /> */}
             
             <form onSubmit={handleSubmit} className="space-y-5">
-              <div className="space-y-1.5">
-                <label className="text-[12px] text-ink-faint">Name</label>
-                <input
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="e.g. Tara"
-                  required
-                  className="w-full rounded-2xl border border-line bg-canvas-alt/30 px-4 py-3 text-[14px] text-ink focus:outline-none"
-                />
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <label className="text-[12px] text-ink-faint">Agent Name</label>
+                  <input
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder="e.g. Tara"
+                    required
+                    className="w-full rounded-2xl border border-line bg-canvas-alt/30 px-4 py-3 text-[14px] text-ink focus:outline-none"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-[12px] text-ink-faint">Purpose</label>
+                  <input
+                    value={purpose}
+                    onChange={(e) => setPurpose(e.target.value)}
+                    placeholder="e.g. Customer Support Assistant"
+                    required
+                    className="w-full rounded-2xl border border-line bg-canvas-alt/30 px-4 py-3 text-[14px] text-ink focus:outline-none"
+                  />
+                </div>
               </div>
 
               <div className="space-y-1.5">
-                <label className="text-[12px] text-ink-faint">Purpose</label>
+                <label className="text-[12px] text-ink-faint">Personality</label>
                 <input
-                  value={purpose}
-                  onChange={(e) => setPurpose(e.target.value)}
-                  placeholder="e.g. Customer Support Assistant"
-                  required
+                  value={personality}
+                  onChange={(e) => setPersonality(e.target.value)}
+                  placeholder="e.g. Empathetic, clear, polite, and reassuring"
                   className="w-full rounded-2xl border border-line bg-canvas-alt/30 px-4 py-3 text-[14px] text-ink focus:outline-none"
                 />
               </div>
@@ -306,7 +489,7 @@ export default function Agents() {
                 <input
                   value={goals}
                   onChange={(e) => setGoals(e.target.value)}
-                  placeholder="Resolve customer inquiries, Respond quickly"
+                  placeholder="Resolve customer inquiries, Reduce wait times"
                   className="w-full rounded-2xl border border-line bg-canvas-alt/30 px-4 py-3 text-[14px] text-ink focus:outline-none"
                 />
               </div>
@@ -321,16 +504,27 @@ export default function Agents() {
                 />
               </div>
 
+              <div className="space-y-1.5">
+                <label className="text-[12px] text-ink-faint">System Directive / Personality Instructions</label>
+                <textarea
+                  value={systemPrompt}
+                  onChange={(e) => setSystemPrompt(e.target.value)}
+                  placeholder="System prompt directives..."
+                  rows={3}
+                  className="w-full rounded-2xl border border-line bg-canvas-alt/30 p-4 text-[13px] text-ink focus:outline-none font-mono text-[12.5px]"
+                />
+              </div>
+
               <div className="space-y-2">
                 <label className="text-[12px] text-ink-faint">Channels</label>
                 <p className="text-[12.5px] text-ink-soft">
-                  Deploy channels (Web Chat, Telegram, ...) from the agent's Channels tab after creation.
+                  Deploy channels (Web Chat, Email, Telegram, ...) from the agent's Channels tab after creation.
                 </p>
               </div>
 
-              <div className="pt-4 flex gap-3">
+              <div className="pt-4 flex gap-3 border-t border-line">
                 <Button type="submit" className="flex-1 justify-center" disabled={createAgentMutation.isPending}>
-                  {createAgentMutation.isPending ? "Creating..." : "Save AI Employee"}
+                  {createAgentMutation.isPending ? "Creating Agent..." : `Create ${name || "Agent"}`}
                 </Button>
                 <Button variant="outline" type="button" onClick={() => setIsCreateOpen(false)}>
                   Cancel

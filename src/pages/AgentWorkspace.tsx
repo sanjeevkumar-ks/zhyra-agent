@@ -154,7 +154,7 @@ export default function AgentWorkspace() {
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <AskZhyraChip label="Improve this agent" />
+            {/* <AskZhyraChip label="Improve this agent" /> */}
             <Button variant="outline" onClick={() => setIsEditOpen(true)}>
               Edit Agent
             </Button>
@@ -486,7 +486,7 @@ function ModelOverridesSection({ agent }: { agent: any }) {
     queryFn: () => apiClient.get<Record<string, boolean>>("/api/providers/config"),
   });
 
-  const activeSpec = providerSpecs.find((p) => p.name === provider);
+  const activeSpec = providerSpecs.find((p: { name: any; }) => p.name === provider);
   const modelList = activeSpec?.available_models || ["gpt-4o-mini", "gemini-3.5-flash", "claude-3-5-sonnet-latest"];
 
   const providerOptions = [
@@ -1045,12 +1045,18 @@ function ChannelsTab({ agent }: { agent: any }) {
     }
   };
 
-  const saveConfig = async (ch: string, config: Record<string, string>) => {
+  const saveConfig = async (ch: string, config: Record<string, string>, autoPublish?: boolean) => {
     setBusy(`${ch}:save`);
     setFeedback(null);
     try {
       await apiClient.put<any>(`/api/agents/${agent.id}/channels/${ch}`, { config });
-      setFeedback({ ok: true, channel: ch, msg: "Configuration saved." });
+      await apiClient.post<any>(`/api/agents/${agent.id}/channels/${ch}/connect`, { config });
+      if (autoPublish) {
+        await apiClient.post<any>(`/api/agents/${agent.id}/channels/${ch}/publish`, {});
+        setFeedback({ ok: true, channel: ch, msg: "Configuration saved and Web Chat published live!" });
+      } else {
+        setFeedback({ ok: true, channel: ch, msg: "Configuration saved. Web Chat is connected and ready to publish." });
+      }
       setConfigureFor(null);
     } catch (e: any) {
       const detail = typeof e === "string" ? e : e?.message || "Failed to save configuration.";
@@ -1158,7 +1164,7 @@ function ChannelsTab({ agent }: { agent: any }) {
         <WebConfigModal
           channel={channels.find((c) => c.type === "web")}
           busy={busy === "web:save"}
-          onSave={(cfg) => saveConfig("web", cfg)}
+          onSave={(cfg, autoPublish) => saveConfig("web", cfg, autoPublish)}
           onClose={() => setConfigureFor(null)}
         />
       )}
@@ -1319,7 +1325,7 @@ function WebConfigModal({
 }: {
   channel?: ChannelState;
   busy: boolean;
-  onSave: (cfg: Record<string, string>) => void;
+  onSave: (cfg: Record<string, string>, autoPublish?: boolean) => void;
   onClose: () => void;
 }) {
   const [form, setForm] = useState({
@@ -1355,9 +1361,12 @@ function WebConfigModal({
             <textarea value={form.welcome_message} onChange={(e) => setForm({ ...form, welcome_message: e.target.value })} className={inputBase} rows={3} placeholder="Hi! How can I help you today?" />
           </div>
         </div>
-        <div className="mt-5 flex justify-end gap-2">
+        <div className="mt-5 flex items-center justify-between gap-2">
           <Button variant="outline" onClick={onClose}>Cancel</Button>
-          <Button onClick={() => onSave(form)} disabled={busy}>{busy ? "Saving..." : "Save"}</Button>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" onClick={() => onSave(form, false)} disabled={busy}>{busy ? "Saving..." : "Save"}</Button>
+            <Button onClick={() => onSave(form, true)} disabled={busy}>{busy ? "Saving..." : "Save & Publish"}</Button>
+          </div>
         </div>
       </div>
     </div>
@@ -1648,7 +1657,7 @@ function EditAgentDrawer({ agent, onClose }: { agent: any; onClose: () => void }
     setSelectedTools((curr) => (curr.includes(toolName) ? curr.filter((t) => t !== toolName) : [...curr, toolName]));
   };
 
-  const connectedIntegrations = integrations.filter((int) => int.connected);
+  const connectedIntegrations = integrations.filter((int: { connected: any; }) => int.connected);
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-black/30 backdrop-blur-xs" onClick={onClose}>

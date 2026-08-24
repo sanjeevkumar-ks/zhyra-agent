@@ -20,19 +20,32 @@ class ConversationBase(BaseModel):
     channel: str = "Web Chat"
     agent_id: str
     agent_name: str
-    status: str = "active"  # "resolved" | "active" | "escalated"
+    status: str = "active"  # "active" | "waiting" | "resolved" | "escalated" | "human_takeover"
     is_test: bool = False
+    environment: str = "production"  # "production" | "playground"
+    human_handling: bool = False
+    assigned_to: Optional[str] = None
+    channel_conversation_id: Optional[str] = None
 
 class ConversationCreate(BaseModel):
     customer: str
     agent_id: str
     channel: Optional[str] = "Web Chat"
     is_test: Optional[bool] = False
+    environment: Optional[str] = "production"
 
 class ConversationUpdate(BaseModel):
     status: Optional[str] = None
     unread: Optional[bool] = None
     escalation_reason: Optional[str] = None
+    human_handling: Optional[bool] = None
+    assigned_to: Optional[str] = None
+
+class TakeoverRequest(BaseModel):
+    user_name: Optional[str] = "Human Support Agent"
+
+class AssignRequest(BaseModel):
+    assignee: str
 
 class ConversationResponse(ConversationBase):
     id: str

@@ -7,6 +7,7 @@ import {
   BookOpen,
   Workflow,
   MessagesSquare,
+  FlaskConical,
   BarChart3,
   Plug,
   BrainCircuit,
@@ -35,7 +36,7 @@ import {
 } from "lucide-react";
 import { cn } from "../utils/cn";
 import { appRoute } from "../lib/routes";
-import { Avatar, Badge } from "./ui";
+import { Avatar } from "./ui";
 import { useAuthStore } from "../store/useAuthStore";
 import { useAdminAuthStore } from "../store/useAdminAuthStore";
 import { apiClient } from "../lib/apiClient";
@@ -53,6 +54,7 @@ const nav = [
   { to: appRoute("/knowledge"), label: "Knowledge", icon: BookOpen },
   { to: appRoute("/workflows"), label: "Workflows", icon: Workflow },
   { to: appRoute("/conversations"), label: "Conversations", icon: MessagesSquare },
+  { to: appRoute("/playground"), label: "AI Playground", icon: FlaskConical },
   { to: appRoute("/analytics"), label: "Analytics", icon: BarChart3 },
   { to: appRoute("/integrations"), label: "Integrations", icon: Plug },
   { to: appRoute("/memory"), label: "Memory", icon: BrainCircuit },
@@ -133,7 +135,7 @@ export function Sidebar({
         {!collapsed && (
           <div className="leading-tight">
             <p className="text-[13.5px] font-semibold tracking-tight text-ink">
-              {isAdminDomain ? "Zhyra Admin Console" : "Zhyra AI OS"}
+              {isAdminDomain ? "Zhyra Admin Console" : "Zhyra AI"}
             </p>
           </div>
         )}

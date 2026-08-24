@@ -1,6 +1,6 @@
 import { auth } from "../../firebase";
 
-const BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
+export const BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
 export class ApiError extends Error {
   status: number;
@@ -173,7 +173,7 @@ export const apiClient = {
 
       buffer += decoder.decode(value, { stream: true });
       const lines = buffer.split("\n\n");
-      
+
       for (let i = 0; i < lines.length - 1; i++) {
         const line = lines[i].trim();
         if (line.startsWith("data: ")) {

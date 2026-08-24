@@ -51,7 +51,7 @@ export default function Customers() {
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-white">Customers</h1>
           <p className="text-[13.5px] text-slate-400">
-            Accounts and customer organizations using Zhyra AI OS.
+            Accounts and customer organizations using Zhyra AI.
           </p>
         </div>
 

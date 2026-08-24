@@ -152,6 +152,8 @@ class ChannelService:
                 continue
             merged[k] = v
         state["config"] = merged
+        if state.get("status") == STATUS_NOT_CONFIGURED:
+            state["status"] = STATUS_CONNECTED
         state["updated_at"] = time.time()
         cls._doc_ref(agent_id, channel_type).set(state, merge=True)
         log_info(f"Channel config updated for {agent_id} / {channel_type}")

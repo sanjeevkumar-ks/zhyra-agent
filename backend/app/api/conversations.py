@@ -3,15 +3,39 @@ from fastapi.responses import StreamingResponse
 from app.middleware.auth import get_current_user, AuthUser
 from app.api.workspaces import get_user_workspace_id
 from app.services.conversation_service import ConversationService
-from app.schemas.conversations import ConversationResponse, ConversationCreate, MessageCreate
-from typing import List
+from app.schemas.conversations import (
+    ConversationResponse,
+    ConversationCreate,
+    MessageCreate,
+    TakeoverRequest,
+    AssignRequest,
+)
+from typing import List, Optional
 
 router = APIRouter()
 
 @router.get("", response_model=List[ConversationResponse])
-async def list_conversations(workspace_id: str = Depends(get_user_workspace_id)):
-    """Exposes chat session list sorted by latest response."""
-    return await ConversationService.list_conversations(workspace_id)
+async def list_conversations(
+    environment: str = Query("production", description="'production' | 'playground'"),
+    agent_id: Optional[str] = Query(None, description="Filter by agent ID"),
+    channel: Optional[str] = Query(None, description="Filter by channel"),
+    status: Optional[str] = Query(None, description="Filter by status"),
+    search: Optional[str] = Query(None, description="Search query"),
+    limit: int = Query(50, ge=1, le=200),
+    cursor: Optional[str] = Query(None),
+    workspace_id: str = Depends(get_user_workspace_id)
+):
+    """Exposes chat session list filtered by environment and workspace."""
+    return await ConversationService.list_conversations(
+        workspace_id=workspace_id,
+        environment=environment,
+        agent_id=agent_id,
+        channel=channel,
+        status=status,
+        search=search,
+        limit=limit,
+        cursor=cursor
+    )
 
 @router.get("/{convo_id}", response_model=ConversationResponse)
 async def get_conversation(
@@ -32,7 +56,57 @@ async def create_conversation(
         agent_id=payload.agent_id,
         customer=payload.customer,
         channel=payload.channel,
-        is_test=bool(payload.is_test)
+        is_test=bool(payload.is_test),
+        environment=payload.environment
+    )
+
+@router.post("/{convo_id}/takeover", response_model=ConversationResponse)
+async def take_over_conversation(
+    convo_id: str,
+    payload: Optional[TakeoverRequest] = None,
+    workspace_id: str = Depends(get_user_workspace_id)
+):
+    """Pauses AI response automation and hands over control to a human support agent."""
+    user_name = payload.user_name if payload else "Human Support Agent"
+    return await ConversationService.take_over_conversation(
+        workspace_id=workspace_id,
+        convo_id=convo_id,
+        user_name=user_name
+    )
+
+@router.post("/{convo_id}/reopen", response_model=ConversationResponse)
+async def reopen_conversation(
+    convo_id: str,
+    workspace_id: str = Depends(get_user_workspace_id)
+):
+    """Resumes AI response automation for the conversation."""
+    return await ConversationService.reopen_conversation(
+        workspace_id=workspace_id,
+        convo_id=convo_id
+    )
+
+@router.post("/{convo_id}/resolve", response_model=ConversationResponse)
+async def resolve_conversation(
+    convo_id: str,
+    workspace_id: str = Depends(get_user_workspace_id)
+):
+    """Marks conversation as resolved."""
+    return await ConversationService.resolve_conversation(
+        workspace_id=workspace_id,
+        convo_id=convo_id
+    )
+
+@router.post("/{convo_id}/assign", response_model=ConversationResponse)
+async def assign_conversation(
+    convo_id: str,
+    payload: AssignRequest,
+    workspace_id: str = Depends(get_user_workspace_id)
+):
+    """Assigns conversation to a team member or support agent."""
+    return await ConversationService.assign_conversation(
+        workspace_id=workspace_id,
+        convo_id=convo_id,
+        assignee=payload.assignee
     )
 
 @router.post("/{convo_id}/messages", response_model=ConversationResponse)

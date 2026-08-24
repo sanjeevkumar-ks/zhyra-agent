@@ -132,7 +132,7 @@ export default function OnboardingPage() {
         <div className="flex items-center justify-between px-6 py-6 sm:px-10">
           <div className="flex items-center gap-2.5">
             <ZhyraMark size={22} />
-            <span className="text-[13px] font-semibold tracking-tight text-ink">Zhyra AI OS</span>
+            <span className="text-[13px] font-semibold tracking-tight text-ink">Zhyra AI</span>
           </div>
           <Link to="/" className="text-[13px] text-ink-faint transition-colors hover:text-ink">
             Back to site

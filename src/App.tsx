@@ -9,6 +9,7 @@ import AgentWorkspace from "./pages/AgentWorkspace";
 import Knowledge from "./pages/Knowledge";
 import Workflows from "./pages/Workflows";
 import Conversations from "./pages/Conversations";
+import Playground from "./pages/Playground";
 import Analytics from "./pages/Analytics";
 import Integrations from "./pages/Integrations";
 import MemoryPage from "./pages/Memory";
@@ -36,6 +37,7 @@ const titles: Record<string, string> = {
   "/knowledge": "Knowledge Hub",
   "/workflows": "Workflow Builder",
   "/conversations": "Conversations",
+  "/playground": "AI Playground",
   "/analytics": "Analytics",
   "/integrations": "Integrations",
   "/memory": "AI Memory",
@@ -70,7 +72,7 @@ function DashboardLayout() {
   const location = useLocation();
   const localPath = location.pathname.replace(/^\/app/, "") || "/";
   const base = "/" + (localPath.split("/")[1] ?? "");
-  const title = titles[base] ?? (localPath.startsWith("/agents/") ? "Agent Workspace" : "Zhyra AI OS");
+  const title = titles[base] ?? (localPath.startsWith("/agents/") ? "Agent Workspace" : "Zhyra AI");
 
   return (
     <AppShell title={title}>
@@ -113,6 +115,9 @@ function MainRoutes() {
           <Route path="knowledge" element={<Knowledge />} />
           <Route path="workflows" element={<Workflows />} />
           <Route path="conversations" element={<Conversations />} />
+          <Route path="conversations/:id" element={<Conversations />} />
+          <Route path="playground" element={<Playground />} />
+          <Route path="playground/:agentId" element={<Playground />} />
           <Route path="analytics" element={<Analytics />} />
           <Route path="integrations" element={<Integrations />} />
           <Route path="memory" element={<MemoryPage />} />
