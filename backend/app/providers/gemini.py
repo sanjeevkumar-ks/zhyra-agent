@@ -89,7 +89,9 @@ def synthesize_contextual_response(prompt: str = "", system_prompt: str = "") ->
         return resp
 
     if user_query:
-        return f"Hello! I am **{agent_name}** ({agent_role}). I received your inquiry: *'{user_query}'*.{' My mandate is: ' + agent_purpose if agent_purpose else ''} How can I assist you further with your task?"
+        if agent_purpose:
+            return f"Hello! I am **{agent_name}** ({agent_role}). My primary mandate is to **{agent_purpose}**.\n\nRegarding *\"{user_query}\"*: I am configured to help you accomplish this. Please let me know the specific details or actions you would like me to handle!"
+        return f"Hello! I am **{agent_name}** ({agent_role}). I am ready to help you with *\"{user_query}\"*. How would you like us to proceed?"
 
     return f"Hello! I am **{agent_name}** ({agent_role}). How can I assist you with your tasks today?"
 

@@ -68,42 +68,50 @@ class ProviderManager:
         settings_snap = settings_ref.get()
         settings_data = settings_snap.to_dict() if settings_snap.exists else {}
         
-        provider_config = settings_data.get(default_provider, {})
+        # Scan available providers starting with default_provider
+        candidates = [default_provider] + [p for p in ["gemini", "openai", "openrouter", "claude", "nvidia"] if p != default_provider]
         
-        # Load API keys (encrypted in DB)
+        selected_provider = default_provider
         decrypted_key = ""
-        if default_provider == "nvidia":
-            raw_models = provider_config.get("models", {})
-            models_config = {}
-            for m_name, m_cfg in raw_models.items():
-                models_config[m_name] = {
-                    "api_key": decrypt_value(m_cfg.get("api_key", "")),
-                    "base_url": m_cfg.get("base_url", "https://integrate.api.nvidia.com/v1")
-                }
-            decrypted_key = models_config
-        elif default_provider == "openrouter":
-            encrypted_key = provider_config.get("api_key", "")
-            decrypted_key = {
-                "api_key": decrypt_value(encrypted_key),
-                "custom_models": provider_config.get("custom_models", [])
-            }
-        else:
-            encrypted_key = provider_config.get("api_key", "")
-            decrypted_key = decrypt_value(encrypted_key)
-        
-        # Override workspace settings if provider settings contain overrides
+        provider_config = {}
+
+        for p_name in candidates:
+            cfg = settings_data.get(p_name, {})
+            key = ""
+            if p_name == "nvidia":
+                raw_models = cfg.get("models", {})
+                models_config = {}
+                for m_name, m_cfg in raw_models.items():
+                    models_config[m_name] = {
+                        "api_key": decrypt_value(m_cfg.get("api_key", "")),
+                        "base_url": m_cfg.get("base_url", "https://integrate.api.nvidia.com/v1")
+                    }
+                key = models_config if any(v.get("api_key") for v in models_config.values()) else ""
+            elif p_name == "openrouter":
+                enc_key = cfg.get("api_key", "")
+                dec_k = decrypt_value(enc_key)
+                if dec_k:
+                    key = {"api_key": dec_k, "custom_models": cfg.get("custom_models", [])}
+            else:
+                enc_key = cfg.get("api_key", "")
+                key = decrypt_value(enc_key)
+
+            if not key:
+                key = cls._get_env_key_fallback(p_name)
+
+            if key:
+                selected_provider = p_name
+                decrypted_key = key
+                provider_config = cfg
+                log_info(f"Resolved active provider '{selected_provider}' for workspace '{workspace_id}'")
+                break
+
         org_id = provider_config.get("organization_id")
         base_url = provider_config.get("base_url")
-        
-        # If no key in DB, try loading server-wide default env key for local testing
-        if not decrypted_key:
-            decrypted_key = cls._get_env_key_fallback(default_provider)
-            if decrypted_key:
-                log_info(f"Using server environment key fallback for provider: '{default_provider}'")
 
         # 3. Instantiate
         instance = cls.get_provider_instance(
-            provider_name=default_provider,
+            provider_name=selected_provider,
             api_key=decrypted_key,
             org_id=org_id,
             base_url=base_url
@@ -111,8 +119,8 @@ class ProviderManager:
         
         # Build unified settings payload
         active_settings = {
-            "provider": default_provider,
-            "model": default_model or instance.available_models[0],
+            "provider": selected_provider,
+            "model": default_model if selected_provider == default_provider and default_model else instance.available_models[0],
             "temperature": temperature,
             "max_tokens": max_tokens,
             "streaming": streaming
