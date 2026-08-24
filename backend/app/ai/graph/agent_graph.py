@@ -210,7 +210,8 @@ async def generate_response_node(state: AgentState) -> Dict[str, Any]:
             state["workspace_id"], state["agent_id"], agent_tools
         )
         overrides = state["agent_data"].get("overrides") or {}
-        system_prompt = overrides.get("system_prompt", "") or f"You are {state['agent_data'].get('name')}. Purpose: {state['agent_data'].get('purpose')}."
+        from app.ai.context.builder import resolve_agent_system_prompt
+        system_prompt = resolve_agent_system_prompt(state["agent_data"], overrides)
         system_prompt += tools_instructions
         prompt = f"Conversational History:\n{history_summary}\nContext documents/policies:\n{state['context']}\n\n"
 

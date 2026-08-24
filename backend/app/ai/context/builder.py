@@ -8,6 +8,41 @@ from app.ai.context.tools import ToolContextBuilder
 from app.ai.context.policies import ContextPolicies
 from app.utils.logger import log_info
 
+def resolve_agent_system_prompt(agent_data: dict, overrides: dict = None) -> str:
+    overrides = overrides or {}
+    
+    sys_prompt = (
+        overrides.get("system_prompt")
+        or agent_data.get("system_prompt")
+        or agent_data.get("instructions")
+        or agent_data.get("system_instructions")
+        or ""
+    ).strip()
+
+    name = agent_data.get("name") or "Zhyra AI Assistant"
+    role = agent_data.get("role") or "AI Employee"
+    purpose = agent_data.get("purpose") or ""
+    description = agent_data.get("description") or ""
+    knowledge_base = agent_data.get("knowledge_base") or agent_data.get("knowledge") or ""
+
+    parts = []
+    parts.append(f"You are {name}, an AI assistant operating in the role of {role}.")
+    
+    if sys_prompt:
+        parts.append(f"AGENT INSTRUCTIONS & BEHAVIORAL DIRECTIVES:\n{sys_prompt}")
+    
+    if purpose:
+        parts.append(f"PRIMARY GOAL & PURPOSE:\n{purpose}")
+        
+    if description:
+        parts.append(f"ROLE DESCRIPTION & RESPONSIBILITIES:\n{description}")
+        
+    if knowledge_base:
+        parts.append(f"DEPLOYED AGENT KNOWLEDGE BASE:\n{knowledge_base}")
+
+    return "\n\n".join(parts)
+
+
 class ContextBuilder:
     @classmethod
     async def assemble_context(
@@ -49,9 +84,7 @@ class ContextBuilder:
         budget = adjusted_budget
         
         # 1. Base system prompt
-        agent_name = agent_data.get("name", "Zhyra Agent")
-        agent_purpose = agent_data.get("purpose", "Help customers resolve inquiries.")
-        system_prompt = overrides.get("system_prompt", "") or f"You are {agent_name}. Purpose: {agent_purpose}."
+        system_prompt = resolve_agent_system_prompt(agent_data, overrides)
         
         # 2. Build conversation rolling history (intent-aware)
         convo_id = history[0].get("conversation_id", f"temp_{agent_id}") if history else f"temp_{agent_id}"
