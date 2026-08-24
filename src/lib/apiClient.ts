@@ -1,6 +1,6 @@
 import { auth } from "../../firebase";
 
-export const BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
+export const BASE_URL = import.meta.env.VITE_API_URL || "https://zhyra-agent.vercel.app";
 
 export class ApiError extends Error {
   status: number;

@@ -61,6 +61,13 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
 
     // Listen for authentication state changes in Firebase
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      const isWidgetRoute =
+        window.location.hash.includes("/widget/") || window.location.pathname.includes("/widget/");
+      if (isWidgetRoute) {
+        set({ loading: false });
+        return;
+      }
+
       set({ loading: true });
       if (firebaseUser) {
         try {

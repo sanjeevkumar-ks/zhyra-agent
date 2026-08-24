@@ -85,6 +85,10 @@ function MainRoutes() {
   const { initialize } = useAuthStore();
 
   useEffect(() => {
+    const isWidgetRoute =
+      window.location.hash.includes("/widget/") || window.location.pathname.includes("/widget/");
+    if (isWidgetRoute) return;
+
     const unsub = initialize();
     return () => unsub();
   }, [initialize]);

@@ -4,7 +4,7 @@ export function widgetApiBase(): string {
   const raw =
     (import.meta.env.VITE_WIDGET_API_URL as string | undefined) ||
     (import.meta.env.VITE_API_URL as string | undefined) ||
-    "http://localhost:8000";
+    "https://zhyra-agent.vercel.app";
   return `${raw.replace(/\/$/, "")}/api/widget`;
 }
 
