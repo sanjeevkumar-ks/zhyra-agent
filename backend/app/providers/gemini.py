@@ -50,8 +50,15 @@ def synthesize_contextual_response(prompt: str = "", system_prompt: str = "") ->
         return f"Based on my knowledge base:\n\n{snippet}"
 
     if "sanjeev" in query_lower:
-        if "sanjeev" in full_text.lower():
-            s_lines = [l for l in lines if "sanjeev" in l.lower()]
+        s_lines = [
+            l for l in lines 
+            if "sanjeev" in l.lower() 
+            and not l.lower().startswith("user:") 
+            and not l.lower().startswith("query:")
+            and not l.lower().startswith("system:")
+            and l.strip().lower() != user_query.strip().lower()
+        ]
+        if s_lines:
             return "Here is what I know about Sanjeev:\n\n" + "\n".join(s_lines[:3])
         return f"I checked my records for 'Sanjeev'. Currently, there are no specific profile notes or knowledge base documents stored about Sanjeev in this workspace. As {agent_name}{' (' + agent_purpose + ')' if agent_purpose else ''}, I'm ready to help answer questions or assist with your workflows!"
 
