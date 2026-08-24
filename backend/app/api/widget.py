@@ -184,6 +184,53 @@ def _extract_session_token(payload: dict, authorization: Optional[str]) -> Optio
     return payload.get("session_token")
 
 
+@router.get("/{widget_id}/config")
+@router.post("/{widget_id}/config")
+async def get_widget_public_config(widget_id: str, request: Request, response: Response):
+    """Returns the public deployment configuration for a widget_id."""
+    _cors_headers(request, response)
+    deployment = await WidgetService.resolve_deployment(widget_id)
+    agent = WidgetService._get_agent(deployment.get("agent_id")) or {}
+    config = deployment.get("config") or {}
+    return {
+        "widget_id": widget_id,
+        "agent_id": deployment.get("agent_id"),
+        "workspace_id": deployment.get("workspace_id"),
+        "agent": {
+            "id": deployment.get("agent_id"),
+            "name": agent.get("name", "AI Employee"),
+            "role": agent.get("role", "AI Assistant"),
+            "avatar": agent.get("avatar", ""),
+            "welcome_message": config.get("welcome_message") or agent.get("welcome_message") or f"Hi! I'm {agent.get('name', 'your AI employee')}. How can I help you today?",
+            "primary_color": config.get("primary_color", "#2F6BFF"),
+        },
+        "allowed_domains": config.get("allowed_domains", []),
+    }
+
+
+@router.post("/{widget_id}/session")
+async def create_widget_session_by_id(widget_id: str, payload: Optional[dict], request: Request, response: Response):
+    """Creates a widget session for a given widget_id parameter in path."""
+    _cors_headers(request, response)
+    body = payload or {}
+    origin = request.headers.get("origin") or body.get("origin") or ""
+    client_ip = request.client.host if request.client else ""
+    session = await WidgetService.create_session(
+        widget_id=widget_id,
+        origin=origin,
+        page_url=body.get("page_url", ""),
+        page_title=body.get("page_title", ""),
+        client_ip=client_ip,
+    )
+    return {
+        "session_id": session["session_id"],
+        "session_token": session["session_id"],
+        "conversation_id": session["conversation_id"],
+        "widget_id": widget_id,
+        "agent": WidgetService.agent_meta(session["agent_id"]),
+    }
+
+
 @router.post("/{widget_id}/test")
 async def widget_health_test(widget_id: str, request: Request, response: Response):
     """Zero-cost public health test for a deployed widget."""
