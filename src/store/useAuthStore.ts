@@ -26,11 +26,48 @@ export interface WorkspaceState {
   knowledge_folders?: string[];
 }
 
+export type ThemeMode = "light" | "dark" | "system";
+
+const getSavedTheme = (): ThemeMode => {
+  if (typeof window === "undefined") return "system";
+  const saved = localStorage.getItem("zhyra_theme");
+  if (saved === "light" || saved === "dark" || saved === "system") {
+    return saved;
+  }
+  return "system";
+};
+
+export const applyTheme = (theme: ThemeMode) => {
+  if (typeof window === "undefined") return;
+  let isDark = false;
+  if (theme === "system") {
+    isDark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+  } else {
+    isDark = theme === "dark";
+  }
+
+  if (isDark) {
+    document.documentElement.classList.add("dark");
+  } else {
+    document.documentElement.classList.remove("dark");
+  }
+};
+
+// Listen for system media query changes if system mode is active
+if (typeof window !== "undefined" && window.matchMedia) {
+  window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
+    const currentTheme = useAuthStore.getState().theme;
+    if (currentTheme === "system") {
+      applyTheme("system");
+    }
+  });
+}
+
 interface AuthStore {
   user: UserState | null;
   workspace: WorkspaceState | null;
   loading: boolean;
-  theme: "light" | "dark";
+  theme: ThemeMode;
   sidebarOpen: boolean;
   
   // Actions
@@ -38,7 +75,7 @@ interface AuthStore {
   setUser: (user: UserState | null) => void;
   setWorkspace: (workspace: WorkspaceState | null) => void;
   updateWorkspaceState: (updates: Partial<WorkspaceState>) => void;
-  setTheme: (theme: "light" | "dark") => void;
+  setTheme: (theme: ThemeMode) => void;
   toggleSidebar: () => void;
   logout: () => Promise<void>;
 }
@@ -47,10 +84,13 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
   user: null,
   workspace: null,
   loading: true,
-  theme: "light",
+  theme: getSavedTheme(),
   sidebarOpen: true,
 
   initialize: () => {
+    // Apply initial saved theme on load
+    applyTheme(getSavedTheme());
+
     // Listen for authentication state changes in Firebase
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       set({ loading: true });
@@ -107,13 +147,10 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
     workspace: state.workspace ? { ...state.workspace, ...updates } : null
   })),
 
-  setTheme: (theme) => {
+  setTheme: (theme: ThemeMode) => {
+    localStorage.setItem("zhyra_theme", theme);
     set({ theme });
-    if (theme === "dark") {
-      document.documentElement.classList.add("dark");
-    } else {
-      document.documentElement.classList.remove("dark");
-    }
+    applyTheme(theme);
   },
 
   toggleSidebar: () => set((state) => ({ sidebarOpen: !state.sidebarOpen })),

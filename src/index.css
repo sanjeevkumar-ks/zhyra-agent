@@ -49,6 +49,34 @@
   }
 }
 
+/* ─────────────────────────────────────────
+   Dark Mode Token Overrides
+───────────────────────────────────────── */
+html.dark {
+  --color-canvas: #090D16;
+  --color-canvas-alt: #111827;
+  --color-surface: #1E293B;
+  --color-ink: #F8FAFC;
+  --color-ink-soft: #94A3B8;
+  --color-ink-faint: #64748B;
+  --color-line: #334155;
+  --color-line-soft: #1E293B;
+
+  --color-accent: #3B82F6;
+  --color-accent-soft: rgba(59, 130, 246, 0.18);
+  --color-violet: #A78BFA;
+  --color-violet-soft: rgba(167, 139, 250, 0.18);
+  --color-emerald: #10B981;
+  --color-emerald-soft: rgba(16, 185, 129, 0.18);
+  --color-amber: #F59E0B;
+  --color-amber-soft: rgba(245, 158, 11, 0.18);
+  --color-rose: #F43F5E;
+  --color-rose-soft: rgba(244, 63, 94, 0.18);
+
+  --shadow-soft: 0 1px 3px rgba(0, 0, 0, 0.5), 0 8px 24px -12px rgba(0, 0, 0, 0.6);
+  --shadow-soft-lg: 0 4px 16px rgba(0, 0, 0, 0.6), 0 24px 48px -20px rgba(0, 0, 0, 0.8);
+}
+
 @layer utilities {
   .scrollbar-none::-webkit-scrollbar { display: none; }
   .scrollbar-none { scrollbar-width: none; -ms-overflow-style: none; }

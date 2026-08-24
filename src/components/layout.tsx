@@ -23,6 +23,9 @@ import {
   ArrowRight,
   AudioLines,
   LogOut,
+  Sun,
+  Moon,
+  Monitor,
 } from "lucide-react";
 import { cn } from "../utils/cn";
 import { appRoute } from "../lib/routes";
@@ -208,7 +211,7 @@ export function Topbar({ onSearch, title, onToggleSidebar }: { onSearch: () => v
   const [profileOpen, setProfileOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
-  const { user, logout } = useAuthStore();
+  const { user, theme, setTheme, logout } = useAuthStore();
 
   useEffect(() => {
     function onClick(e: MouseEvent) {
@@ -280,7 +283,7 @@ export function Topbar({ onSearch, title, onToggleSidebar }: { onSearch: () => v
         <div className="relative">
           <button
             onClick={() => setCreateOpen((v) => !v)}
-            className="inline-flex items-center gap-1.5 rounded-full bg-ink px-3 md:px-3.5 py-2 text-[13px] font-medium text-white shadow-soft transition-transform hover:-translate-y-px active:scale-[0.97]"
+            className="inline-flex items-center gap-1.5 rounded-full bg-ink px-3 md:px-3.5 py-2 text-[13px] font-medium text-canvas shadow-soft transition-transform hover:-translate-y-px active:scale-[0.97]"
           >
             <Plus size={14} />
             <span className="hidden sm:inline">Create</span>
@@ -390,7 +393,7 @@ export function Topbar({ onSearch, title, onToggleSidebar }: { onSearch: () => v
                 animate={{ opacity: 1, y: 0, scale: 1 }}
                 exit={{ opacity: 0, y: 6, scale: 0.98 }}
                 transition={{ duration: 0.15 }}
-                className="absolute right-0 top-11 w-48 rounded-xl border border-line bg-surface p-1.5 shadow-soft-lg"
+                className="absolute right-0 top-11 w-56 rounded-xl border border-line bg-surface p-1.5 shadow-soft-lg"
               >
                 <div className="px-2.5 py-2 text-left">
                   <p className="text-[13px] font-semibold text-ink leading-tight">
@@ -400,14 +403,66 @@ export function Topbar({ onSearch, title, onToggleSidebar }: { onSearch: () => v
                     {user?.email}
                   </p>
                 </div>
+
                 <div className="my-1 h-px bg-line" />
+
+                {/* Theme Selector */}
+                <div className="px-2 py-1.5">
+                  <p className="mb-1.5 px-0.5 text-[10.5px] font-semibold uppercase tracking-wider text-ink-faint">
+                    Theme
+                  </p>
+                  <div className="flex items-center gap-1 rounded-lg bg-canvas-alt p-1">
+                    <button
+                      onClick={() => setTheme("light")}
+                      className={cn(
+                        "flex flex-1 items-center justify-center gap-1.5 rounded-md px-2 py-1 text-[11.5px] transition-all",
+                        theme === "light"
+                          ? "bg-surface text-ink font-semibold shadow-xs"
+                          : "text-ink-faint hover:text-ink"
+                      )}
+                      title="Light mode"
+                    >
+                      <Sun size={12} />
+                      <span>Light</span>
+                    </button>
+                    <button
+                      onClick={() => setTheme("dark")}
+                      className={cn(
+                        "flex flex-1 items-center justify-center gap-1.5 rounded-md px-2 py-1 text-[11.5px] transition-all",
+                        theme === "dark"
+                          ? "bg-surface text-ink font-semibold shadow-xs"
+                          : "text-ink-faint hover:text-ink"
+                      )}
+                      title="Dark mode"
+                    >
+                      <Moon size={12} />
+                      <span>Dark</span>
+                    </button>
+                    <button
+                      onClick={() => setTheme("system")}
+                      className={cn(
+                        "flex flex-1 items-center justify-center gap-1.5 rounded-md px-2 py-1 text-[11.5px] transition-all",
+                        theme === "system"
+                          ? "bg-surface text-ink font-semibold shadow-xs"
+                          : "text-ink-faint hover:text-ink"
+                      )}
+                      title="System default"
+                    >
+                      <Monitor size={12} />
+                      <span>System</span>
+                    </button>
+                  </div>
+                </div>
+
+                <div className="my-1 h-px bg-line" />
+
                 <button
                   onClick={async () => {
                     setProfileOpen(false);
                     await logout();
                     navigate(appRoute("/auth"));
                   }}
-                  className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[13px] text-rose-500 hover:bg-rose-50/50"
+                  className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[13px] text-rose-500 hover:bg-rose-500/10 transition-colors"
                 >
                   <LogOut size={14} />
                   Sign Out
