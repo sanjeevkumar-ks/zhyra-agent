@@ -6,69 +6,92 @@ from app.providers.base_provider import LLMProvider
 from app.utils.logger import log_error, log_info
 
 def synthesize_contextual_response(prompt: str = "", system_prompt: str = "") -> str:
-    """Generates a dynamic, context-aware AI response based on prompt, RAG sources, system instructions, and user query."""
+    """Generates a dynamic, context-aware AI response based on the deployed agent's full persona, system prompt, knowledge base, and query."""
     full_text = f"{system_prompt or ''}\n{prompt or ''}"
     
     user_query = ""
     lines = [l.strip() for l in full_text.split("\n") if l.strip()]
     for l in reversed(lines):
-        if l.startswith("User:") or l.startswith("Query:"):
+        if l.startswith("Customer:") or l.startswith("User:") or l.startswith("Query:"):
             user_query = l.split(":", 1)[1].strip()
             break
     if not user_query and lines:
         user_query = lines[-1]
 
     agent_name = "Zhyra AI Assistant"
+    agent_role = "AI Assistant"
     agent_purpose = ""
+    
     if "You are " in (system_prompt or ""):
         try:
-            agent_name = system_prompt.split("You are ")[1].split(".")[0].strip()
+            name_part = system_prompt.split("You are ")[1].split(".")[0].strip()
+            if "," in name_part:
+                agent_name = name_part.split(",")[0].strip()
+            else:
+                agent_name = name_part
         except Exception:
             pass
-    if "Purpose: " in (system_prompt or ""):
+
+    if "role of " in (system_prompt or ""):
         try:
-            agent_purpose = system_prompt.split("Purpose: ")[1].split(".")[0].strip()
+            agent_role = system_prompt.split("role of ")[1].split(".")[0].strip()
+        except Exception:
+            pass
+
+    if "PRIMARY GOAL & PURPOSE:" in (system_prompt or ""):
+        try:
+            agent_purpose = system_prompt.split("PRIMARY GOAL & PURPOSE:")[1].split("\n\n")[0].strip()
         except Exception:
             pass
 
     query_lower = user_query.lower()
     query_terms = [w.lower() for w in user_query.split() if len(w) > 2]
     matching_lines = []
+    
     for line in lines:
         l_lower = line.lower()
         if (
             any(term in l_lower for term in query_terms)
+            and not line.startswith("Customer:")
             and not line.startswith("User:")
             and not line.startswith("Query:")
             and not line.startswith("System:")
-            and line != user_query
+            and not line.startswith("You are ")
+            and not line.startswith("Conversational History:")
+            and line.strip().lower() != user_query.strip().lower()
         ):
             matching_lines.append(line)
 
     if matching_lines:
         snippet = "\n".join(matching_lines[:4])
-        return f"Based on my knowledge base:\n\n{snippet}"
+        return f"Hello! As **{agent_name}** ({agent_role}), here is what I found in my knowledge base:\n\n{snippet}"
 
     if "sanjeev" in query_lower:
         s_lines = [
             l for l in lines 
             if "sanjeev" in l.lower() 
+            and not l.lower().startswith("customer:")
             and not l.lower().startswith("user:") 
             and not l.lower().startswith("query:")
             and not l.lower().startswith("system:")
+            and not l.lower().startswith("you are ")
             and l.strip().lower() != user_query.strip().lower()
         ]
         if s_lines:
-            return "Here is what I know about Sanjeev:\n\n" + "\n".join(s_lines[:3])
-        return f"I checked my records for 'Sanjeev'. Currently, there are no specific profile notes or knowledge base documents stored about Sanjeev in this workspace. As {agent_name}{' (' + agent_purpose + ')' if agent_purpose else ''}, I'm ready to help answer questions or assist with your workflows!"
+            return f"Hello! I am **{agent_name}** ({agent_role}). Here is the information recorded in my knowledge base regarding Sanjeev:\n\n" + "\n".join(s_lines[:3])
+        return f"I am **{agent_name}** ({agent_role}). I checked my deployed knowledge base for 'Sanjeev'. Currently, there are no specific profile notes or knowledge documents stored about Sanjeev in my workspace.{' My primary mandate is: ' + agent_purpose if agent_purpose else ''} Please let me know how I can assist you!"
 
-    if any(k in query_lower for k in ["who are you", "what can you do", "help", "who you are", "identity"]):
-        return f"Hi! I'm {agent_name}. {agent_purpose if agent_purpose else 'I am here to assist with your everyday tasks and workspace workflows.'} How can I help you today?"
+    if any(k in query_lower for k in ["who are you", "what can you do", "help", "who you are", "identity", "what is your role", "purpose"]):
+        resp = f"Hello! I am **{agent_name}**, operating as a **{agent_role}**."
+        if agent_purpose:
+            resp += f"\n\n**My Primary Purpose**: {agent_purpose}"
+        resp += "\n\nHow can I help you today?"
+        return resp
 
     if user_query:
-        return f"I received your query ('{user_query}'). As {agent_name}, I'm ready to assist you with your workspace tasks and inquiries. Please let me know how I can help!"
+        return f"Hello! I am **{agent_name}** ({agent_role}). I received your inquiry: *'{user_query}'*.{' My mandate is: ' + agent_purpose if agent_purpose else ''} How can I assist you further with your task?"
 
-    return f"Hi! I'm {agent_name}. How can I assist you with your workspace tasks today?"
+    return f"Hello! I am **{agent_name}** ({agent_role}). How can I assist you with your tasks today?"
 
 
 class GeminiProvider(LLMProvider):
