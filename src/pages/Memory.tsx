@@ -165,7 +165,7 @@ export default function MemoryPage() {
             key={f.key}
             onClick={() => setFilter(f.key)}
             className={`rounded-full px-3.5 py-1.5 text-[13px] font-medium transition-colors ${
-              filter === f.key ? "bg-ink text-white" : "text-ink-soft hover:text-ink"
+              filter === f.key ? "bg-ink text-canvas" : "text-ink-soft hover:text-ink"
             }`}
           >
             {f.label}

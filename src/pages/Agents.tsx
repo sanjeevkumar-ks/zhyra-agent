@@ -110,7 +110,7 @@ export default function Agents() {
               key={f}
               onClick={() => setFilter(f)}
               className={`rounded-full px-3.5 py-1.5 text-[13px] font-medium capitalize transition-colors ${
-                filter === f ? "bg-ink text-white" : "text-ink-soft hover:text-ink"
+                filter === f ? "bg-ink text-canvas" : "text-ink-soft hover:text-ink"
               }`}
             >
               {f}

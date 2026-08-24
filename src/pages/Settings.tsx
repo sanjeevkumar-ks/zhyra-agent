@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Building2, ShieldCheck, CreditCard, Palette, Globe2, Bell, KeyRound, ChevronRight, Check, X, ShieldAlert } from "lucide-react";
 import { useAuthStore } from "../store/useAuthStore";
 import { apiClient } from "../lib/apiClient";
-import { AskZhyraChip, Badge, Button, PageHeader, Panel } from "../components/ui";
+import { AskZhyraChip, Badge, Button, PageHeader, Panel, Toggle } from "../components/ui";
 
 const sections = [
   { key: "workspace", label: "Workspace", icon: Building2 },
@@ -607,16 +607,7 @@ function Row({ label, desc, enabled = false }: { label: string; desc: string; en
         <p className="text-[13.5px] font-medium text-ink">{label}</p>
         <p className="text-[12.5px] text-ink-soft">{desc}</p>
       </div>
-      <button
-        onClick={() => setOn(!on)}
-        className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${on ? "bg-ink" : "bg-canvas-alt"}`}
-      >
-        <span
-          className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow-soft transition-transform ${
-            on ? "translate-x-[22px]" : "translate-x-0.5"
-          }`}
-        />
-      </button>
+      <Toggle checked={on} onChange={setOn} />
     </div>
   );
 }

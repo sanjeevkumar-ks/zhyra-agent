@@ -1829,7 +1829,7 @@ function Toggle({
       disabled={disabled}
       onClick={() => onChange(!checked)}
       className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full border transition-colors duration-200 disabled:cursor-not-allowed disabled:opacity-40 ${
-        checked ? "border-ink bg-ink" : "border-line bg-canvas-alt"
+        checked ? "border-accent bg-accent" : "border-line bg-canvas-alt"
       }`}
     >
       <span

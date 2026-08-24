@@ -85,7 +85,7 @@ export function Button({
   icon?: ReactNode;
 }) {
   const variants: Record<string, string> = {
-    primary: "bg-ink text-white hover:bg-ink/85 shadow-soft",
+    primary: "bg-ink text-canvas hover:bg-ink/85 shadow-soft",
     secondary: "bg-accent text-white hover:bg-accent/90 shadow-soft",
     ghost: "bg-transparent text-ink-soft hover:bg-canvas-alt hover:text-ink",
     outline: "bg-surface border border-line text-ink hover:border-ink/30",
@@ -246,3 +246,38 @@ export function ProgressRing({ value, size = 56, color = "#2F6BFF" }: { value: n
     </svg>
   );
 }
+
+export function Toggle({
+  checked,
+  onChange,
+  disabled,
+  className,
+}: {
+  checked: boolean;
+  onChange: (val: boolean) => void;
+  disabled?: boolean;
+  className?: string;
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      disabled={disabled}
+      onClick={() => onChange(!checked)}
+      className={cn(
+        "relative inline-flex h-6 w-11 shrink-0 items-center rounded-full border transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-40",
+        checked ? "border-accent bg-accent" : "border-line bg-canvas-alt",
+        className
+      )}
+    >
+      <span
+        className={cn(
+          "inline-block h-[18px] w-[18px] transform rounded-full bg-white shadow-sm transition-transform duration-200",
+          checked ? "translate-x-[21px]" : "translate-x-[3px]"
+        )}
+      />
+    </button>
+  );
+}
+

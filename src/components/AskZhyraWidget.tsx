@@ -135,7 +135,7 @@ export default function AskZhyraWidget() {
             : "scale-100 opacity-100 hover:-translate-y-0.5 hover:bg-white/75 hover:shadow-[0_12px_36px_rgba(15,23,42,0.18)]"
         }`}
       >
-        <span className="flex h-6 w-6 items-center justify-center rounded-full bg-ink text-white">
+        <span className="flex h-6 w-6 items-center justify-center rounded-full bg-ink text-canvas">
           <Sparkles size={12} />
         </span>
         Ask Zhyra
@@ -155,7 +155,7 @@ export default function AskZhyraWidget() {
 
           <div className="relative flex items-center justify-between border-b border-white/30 px-5 py-4">
             <div className="flex items-center gap-2.5">
-              <span className="flex h-8 w-8 items-center justify-center rounded-full bg-ink text-white">
+              <span className="flex h-8 w-8 items-center justify-center rounded-full bg-ink text-canvas">
                 <Sparkles size={14} />
               </span>
               <div>
@@ -218,7 +218,7 @@ export default function AskZhyraWidget() {
                   <div className={`max-w-[80%] space-y-2 ${m.role === "user" ? "text-right" : ""}`}>
                     <div
                       className={`inline-block rounded-2xl px-4 py-2.5 text-left text-[13px] leading-relaxed ${
-                        m.role === "user" ? "bg-ink text-white" : "bg-white/70 text-ink"
+                        m.role === "user" ? "bg-ink text-canvas" : "bg-surface/80 text-ink"
                       }`}
                     >
                       {m.content}
@@ -244,7 +244,7 @@ export default function AskZhyraWidget() {
               ))}
               {chatMutation.isPending && (
                 <div className="flex items-center gap-3">
-                  <span className="flex h-7 w-7 items-center justify-center rounded-full bg-ink text-white">
+                  <span className="flex h-7 w-7 items-center justify-center rounded-full bg-ink text-canvas">
                     <Sparkles size={12} />
                   </span>
                   <span className="flex items-center gap-1 rounded-2xl bg-white/70 px-4 py-3">
@@ -277,7 +277,7 @@ export default function AskZhyraWidget() {
               <button
                 onClick={() => handleSend()}
                 disabled={!input.trim() || chatMutation.isPending}
-                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-ink text-white transition-opacity disabled:opacity-30"
+                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-ink text-canvas transition-opacity disabled:opacity-30"
               >
                 {chatMutation.isPending ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />}
               </button>

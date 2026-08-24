@@ -57,6 +57,10 @@ html.dark {
   --shadow-soft-lg: 0 4px 16px rgba(0, 0, 0, 0.6);
 }
 
+html.dark .bg-ink {
+  color: var(--color-canvas);
+}
+
 @layer base {
   * {
     border-color: var(--color-line);

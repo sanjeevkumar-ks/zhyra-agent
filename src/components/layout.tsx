@@ -16,6 +16,7 @@ import {
   ChevronsLeft,
   ChevronsRight,
   ChevronDown,
+  ChevronRight,
   Bell,
   Plus,
   Sparkles,
@@ -28,6 +29,9 @@ import {
   Activity,
   AlertTriangle,
   LogOut,
+  Moon,
+  Sun,
+  Monitor,
 } from "lucide-react";
 import { cn } from "../utils/cn";
 import { appRoute } from "../lib/routes";
@@ -323,7 +327,7 @@ export function Topbar({ onSearch, title, onToggleSidebar }: { onSearch: () => v
         <div className="relative">
           <button
             onClick={() => setCreateOpen((v) => !v)}
-            className="inline-flex items-center gap-1.5 rounded-full bg-ink px-3 md:px-3.5 py-2 text-[13px] font-medium text-white shadow-soft transition-transform hover:-translate-y-px active:scale-[0.97]"
+            className="inline-flex items-center gap-1.5 rounded-full bg-ink px-3 md:px-3.5 py-2 text-[13px] font-medium text-canvas shadow-soft transition-transform hover:-translate-y-px active:scale-[0.97]"
           >
             <Plus size={14} />
             <span className="hidden sm:inline">Create</span>
@@ -689,7 +693,7 @@ export function CommandBar({ open, onClose }: { open: boolean; onClose: () => vo
                           navigate(appRoute("/agents"));
                         }
                       }}
-                      className="flex w-full items-center justify-center gap-2 rounded-xl bg-ink py-2.5 text-[13px] font-medium text-white transition-transform hover:-translate-y-px"
+                      className="flex w-full items-center justify-center gap-2 rounded-xl bg-ink py-2.5 text-[13px] font-medium text-canvas transition-transform hover:-translate-y-px"
                     >
                       Configure this agent <ArrowRight size={14} />
                     </button>
@@ -700,7 +704,7 @@ export function CommandBar({ open, onClose }: { open: boolean; onClose: () => vo
                         onClose();
                         navigate(appRoute("/workflows"));
                       }}
-                      className="flex w-full items-center justify-center gap-2 rounded-xl bg-ink py-2.5 text-[13px] font-medium text-white transition-transform hover:-translate-y-px"
+                      className="flex w-full items-center justify-center gap-2 rounded-xl bg-ink py-2.5 text-[13px] font-medium text-canvas transition-transform hover:-translate-y-px"
                     >
                       Open Workflow Builder <ArrowRight size={14} />
                     </button>
@@ -708,7 +712,7 @@ export function CommandBar({ open, onClose }: { open: boolean; onClose: () => vo
                   {responseAction !== "CREATE_AGENT" && responseAction !== "CREATE_WORKFLOW" && (
                     <button
                       onClick={onClose}
-                      className="flex w-full items-center justify-center gap-2 rounded-xl bg-ink py-2.5 text-[13px] font-medium text-white transition-transform hover:-translate-y-px"
+                      className="flex w-full items-center justify-center gap-2 rounded-xl bg-ink py-2.5 text-[13px] font-medium text-canvas transition-transform hover:-translate-y-px"
                     >
                       Done
                     </button>

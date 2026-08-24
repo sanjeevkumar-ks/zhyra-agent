@@ -47,10 +47,18 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
   user: null,
   workspace: null,
   loading: true,
-  theme: "light",
+  theme: (localStorage.getItem("theme") as "light" | "dark") || "dark",
   sidebarOpen: true,
 
   initialize: () => {
+    const savedTheme = (localStorage.getItem("theme") as "light" | "dark") || "dark";
+    set({ theme: savedTheme });
+    if (savedTheme === "dark") {
+      document.documentElement.classList.add("dark");
+    } else {
+      document.documentElement.classList.remove("dark");
+    }
+
     // Listen for authentication state changes in Firebase
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       set({ loading: true });
@@ -109,6 +117,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
 
   setTheme: (theme) => {
     set({ theme });
+    localStorage.setItem("theme", theme);
     if (theme === "dark") {
       document.documentElement.classList.add("dark");
     } else {
