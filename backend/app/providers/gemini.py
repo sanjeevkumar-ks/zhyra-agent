@@ -35,7 +35,14 @@ def synthesize_contextual_response(prompt: str = "", system_prompt: str = "") ->
     query_terms = [w.lower() for w in user_query.split() if len(w) > 2]
     matching_lines = []
     for line in lines:
-        if any(term in line.lower() for term in query_terms) and not line.startswith("User:") and not line.startswith("System:"):
+        l_lower = line.lower()
+        if (
+            any(term in l_lower for term in query_terms)
+            and not line.startswith("User:")
+            and not line.startswith("Query:")
+            and not line.startswith("System:")
+            and line != user_query
+        ):
             matching_lines.append(line)
 
     if matching_lines:
