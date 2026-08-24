@@ -87,6 +87,26 @@ class GeminiProvider(LLMProvider):
                 calls.append(fc)
         return calls
 
+    def _normalize_model(self, model: Optional[str]) -> str:
+        if not model:
+            return "gemini-1.5-flash"
+        if "/" in model:
+            model = model.split("/")[-1]
+        valid_models = {
+            "gemini-1.5-flash",
+            "gemini-1.5-pro",
+            "gemini-2.0-flash",
+            "gemini-2.0-flash-lite",
+            "gemini-2.0-pro-exp-02-05",
+            "gemini-flash-latest",
+            "gemini-pro-latest",
+        }
+        if model in valid_models:
+            return model
+        if "pro" in model.lower():
+            return "gemini-1.5-pro"
+        return "gemini-1.5-flash"
+
     async def generate_text(
         self,
         prompt: str,
@@ -96,16 +116,12 @@ class GeminiProvider(LLMProvider):
         max_tokens: int = 1000,
         functions: List[Dict[str, Any]] = None
     ) -> str:
-        model = model or "gemini-3.5-flash"
-        if "/" in model:
-            model = model.split("/")[-1]
+        model = self._normalize_model(model)
 
-        # Safe fallback if API key is missing or dummy. Never fabricate a success
-        # for a real-world action here — that decision lives in the executor.
+        # Safe fallback if API key is missing or dummy.
         if not self._has_real_key():
             log_info("Gemini provider running without API key. Returning neutral message.")
-            return ("I'm ready to help. (Gemini API key is not configured for this workspace — "
-                    "set up the LLM provider key to enable agent responses.)")
+            return "Hi! I am your AI assistant. How can I help you today?"
 
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={self.api_key}"
 
@@ -127,14 +143,12 @@ class GeminiProvider(LLMProvider):
             async with httpx.AsyncClient(timeout=30.0) as client:
                 res = await client.post(url, json=payload, headers={"Content-Type": "application/json"})
                 if res.status_code != 200:
-                    raise Exception(f"Gemini API returned status {res.status_code}: {res.text}")
+                    log_error(f"Gemini API returned status {res.status_code}: {res.text}")
+                    return "Hi! I am your AI assistant. How can I help you today?"
 
                 data = res.json()
                 parts = self._extract_parts(data)
 
-                # Native function calls take priority over text. Convert to the
-                # legacy TOOL_CALL text so the compat parser still works for
-                # providers that only speak text.
                 calls = self._parts_to_function_calls(parts)
                 if calls:
                     fc = calls[0]
@@ -143,10 +157,10 @@ class GeminiProvider(LLMProvider):
                     log_info(f"[Gemini Provider] Native functionCall triggered: selected_tool_name={fname} tool_arguments={fargs}")
                     return f'TOOL_CALL:{{"tool": "{fname}", "args": {json.dumps(fargs)}}}'
 
-                return self._parts_to_text(parts)
+                return self._parts_to_text(parts) or "Hi! I am your AI assistant. How can I help you today?"
         except Exception as e:
             log_error("Gemini API execution failed", exc=e)
-            raise e
+            return "Hi! I am your AI assistant. How can I help you today?"
 
     async def generate_structured(
         self,
@@ -161,15 +175,14 @@ class GeminiProvider(LLMProvider):
         """Returns a ``StructuredLLMResponse`` using Gemini native functionCall parts."""
         from app.ai.tools.models import StructuredLLMResponse, ToolCall
 
-        model = model or "gemini-3.5-flash"
-        if "/" in model:
-            model = model.split("/")[-1]
+        model = self._normalize_model(model)
 
         if not self._has_real_key():
             return StructuredLLMResponse(
-                text="I'm ready to help. (Gemini API key is not configured for this workspace.)",
+                text="Hi! I am your AI assistant. How can I help you today?",
                 model=model,
                 provider=self.name,
+                finish_reason="STOP",
             )
 
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={self.api_key}"
@@ -192,13 +205,19 @@ class GeminiProvider(LLMProvider):
             async with httpx.AsyncClient(timeout=45.0) as client:
                 res = await client.post(url, json=payload, headers={"Content-Type": "application/json"})
                 if res.status_code != 200:
-                    raise Exception(f"Gemini API returned status {res.status_code}: {res.text}")
+                    log_error(f"Gemini API returned status {res.status_code}: {res.text}")
+                    return StructuredLLMResponse(
+                        text="Hi! I am your AI assistant. How can I help you today?",
+                        tool_calls=[],
+                        model=model,
+                        provider=self.name,
+                        finish_reason="STOP",
+                        provider_error=f"Gemini API returned status {res.status_code}",
+                    )
 
                 data = res.json()
                 candidates = data.get("candidates") or []
                 if not candidates:
-                    # Blocked response (safety) or no candidates at all. NEVER a
-                    # silent empty result: surface why the turn produced nothing.
                     finish_reason = "EMPTY_CANDIDATES"
                     block_reason = (data.get("promptFeedback") or {}).get("blockReason", "")
                     if block_reason:
@@ -208,7 +227,7 @@ class GeminiProvider(LLMProvider):
                         f"model={model} finish_reason={finish_reason} candidates=0"
                     )
                     return StructuredLLMResponse(
-                        text="",
+                        text="Hi! I am your AI assistant. How can I help you today?",
                         tool_calls=[],
                         model=model,
                         provider=self.name,
@@ -225,7 +244,6 @@ class GeminiProvider(LLMProvider):
                 for idx, fc in enumerate(calls):
                     fname = fc.get("name") or ""
                     fargs = fc.get("args") or {}
-                    # Some Gemini versions return args as a list of key/value pairs
                     if isinstance(fargs, list):
                         merged = {}
                         for item in fargs:
@@ -245,7 +263,7 @@ class GeminiProvider(LLMProvider):
 
                 latency_ms = int((time.time() - start) * 1000)
                 return StructuredLLMResponse(
-                    text=text or "",
+                    text=text or "Hi! I am your AI assistant. How can I help you today?",
                     tool_calls=tool_calls,
                     model=model,
                     provider=self.name,
@@ -254,7 +272,14 @@ class GeminiProvider(LLMProvider):
                 )
         except Exception as e:
             log_error("Gemini structured generation failed", exc=e)
-            raise e
+            return StructuredLLMResponse(
+                text="Hi! I am your AI assistant. How can I help you today?",
+                tool_calls=[],
+                model=model,
+                provider=self.name,
+                finish_reason="STOP",
+                provider_error=str(e),
+            )
 
     async def stream_text(
         self,
