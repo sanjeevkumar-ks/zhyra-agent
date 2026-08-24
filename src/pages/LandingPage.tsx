@@ -1,5 +1,5 @@
-// Landingpage.tsx
 import { type ReactNode, useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   AudioLines,
@@ -139,12 +139,21 @@ const faq = [
 ───────────────────────────────────────── */
 
 export default function LandingPage() {
+  const navigate = useNavigate();
   const [billingMode, setBillingMode] = useState<"monthly" | "annual">("monthly");
   const [openFaq, setOpenFaq] = useState(faq[0][0]);
   const [scrolled, setScrolled] = useState(false);
   const plans = pricing[billingMode];
 
-  const goTo = (path: string) => { window.location.href = path; };
+  const goTo = (path: string) => {
+    if (path.startsWith("#")) {
+      const el = document.querySelector(path);
+      if (el) el.scrollIntoView({ behavior: "smooth" });
+      return;
+    }
+    const target = path === "/dashboard" ? "/app" : path;
+    navigate(target);
+  };
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 40);
