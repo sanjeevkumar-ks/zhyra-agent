@@ -79,14 +79,16 @@ export default function WidgetPage() {
       post("zhyra:opened");
       post("zhyra:session_created", { widget_id: widgetId });
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Unable to connect to the assistant.");
-      post("zhyra:error", { message: error });
+      const errMsg = e instanceof Error ? e.message : "Unable to connect to the assistant.";
+      setError(errMsg);
+      post("zhyra:error", { message: errMsg });
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
+    post("zhyra:ready");
     start();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [widgetId]);
