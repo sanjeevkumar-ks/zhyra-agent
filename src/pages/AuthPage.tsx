@@ -33,10 +33,8 @@ function GoogleIcon({ className }: { className?: string }) {
 
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword, updateProfile } from "firebase/auth";
 import { apiClient } from "../lib/apiClient";
-import { useLightModeOnly } from "../hooks/useLightModeOnly";
 
 export default function AuthPage({ mode }: { mode: "signin" | "signup" }) {
-  useLightModeOnly();
   const navigate = useNavigate();
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -53,7 +51,7 @@ export default function AuthPage({ mode }: { mode: "signin" | "signup" }) {
       const result = await signInWithPopup(auth, googleProvider);
       const user = result.user;
       const token = await user.getIdToken();
-      
+
       // Verify token with backend
       try {
         await apiClient.post("/api/auth/verify", {});

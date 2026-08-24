@@ -1,6 +1,5 @@
 // Landingpage.tsx
 import { type ReactNode, useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   AudioLines,
@@ -140,19 +139,12 @@ const faq = [
 ───────────────────────────────────────── */
 
 export default function LandingPage() {
-  const navigate = useNavigate();
   const [billingMode, setBillingMode] = useState<"monthly" | "annual">("monthly");
   const [openFaq, setOpenFaq] = useState(faq[0][0]);
   const [scrolled, setScrolled] = useState(false);
   const plans = pricing[billingMode];
 
-  const goTo = (path: string) => {
-    if (path === "/dashboard" || path === "/app") {
-      navigate("/app");
-    } else {
-      navigate(path);
-    }
-  };
+  const goTo = (path: string) => { window.location.href = path; };
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 40);
@@ -180,8 +172,10 @@ export default function LandingPage() {
           -webkit-backdrop-filter: blur(14px);
           backdrop-filter: blur(14px);
           border: none;
+          // box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.12), 0 8px 30px rgba(0,0,0,0.35);
           position: relative;
           overflow: hidden;
+          // color: white;
         }
         .liquid-glass::before {
           content: "";
@@ -189,6 +183,7 @@ export default function LandingPage() {
           inset: 0;
           border-radius: inherit;
           padding: 1.2px;
+          // background: linear-gradient(180deg, rgba(255,255,255,0.45) 0%, rgba(255,255,255,0.15) 20%, rgba(255,255,255,0) 40%, rgba(255,255,255,0) 60%, rgba(255,255,255,0.15) 80%, rgba(255,255,255,0.45) 100%);
           -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
           -webkit-mask-composite: xor;
           mask-composite: exclude;
@@ -315,7 +310,7 @@ export default function LandingPage() {
             <p className="relative mx-auto mt-4 max-w-lg text-[14px] leading-relaxed text-gray-400 sm:text-[15px]">Start free and move from idea to working agent without a long setup cycle.</p>
             <div className="relative mt-9 flex flex-col justify-center gap-3 sm:flex-row">
               <Button size="lg" onClick={() => goTo("/signup")}>Start Free</Button>
-              <Button variant="outline" size="lg" onClick={() => goTo("/app")}>View Dashboard</Button>
+              <Button variant="outline" size="lg" onClick={() => goTo("/dashboard")}>View Dashboard</Button>
             </div>
             <p className="relative mt-4 text-[12px] text-gray-500">No credit card required.</p>
           </div>
@@ -353,15 +348,6 @@ export default function LandingPage() {
 function SiteNav({ goTo, scrolled }: { goTo: (path: string) => void; scrolled: boolean }) {
   const [menuOpen, setMenuOpen] = useState(false);
 
-  const handleNavClick = (e: React.MouseEvent, href: string) => {
-    e.preventDefault();
-    const targetId = href.replace("#", "");
-    const elem = document.getElementById(targetId);
-    if (elem) {
-      elem.scrollIntoView({ behavior: "smooth" });
-    }
-  };
-
   return (
     <header className={cn("fixed inset-x-0 top-0 z-50 px-5 transition-all duration-300 sm:px-8 lg:px-10", scrolled ? "pt-3" : "pt-4 sm:pt-5 md:pt-6")}>
       <div
@@ -376,15 +362,7 @@ function SiteNav({ goTo, scrolled }: { goTo: (path: string) => void; scrolled: b
 
         <div className="hidden items-center gap-7 lg:flex">
           {navItems.map((item, i) => (
-            <a
-              key={item.label}
-              href={item.href}
-              onClick={(e) => handleNavClick(e, item.href)}
-              className="text-[13px] text-gray-300 transition-colors hover:text-white animate-blur-fade-up"
-              style={{ animationDelay: `${100 + i * 50}ms` }}
-            >
-              {item.label}
-            </a>
+            <a key={item.label} href={item.href} className="text-[13px] text-gray-300 transition-colors hover:text-white animate-blur-fade-up" style={{ animationDelay: `${100 + i * 50}ms` }}>{item.label}</a>
           ))}
         </div>
 
@@ -416,16 +394,7 @@ function SiteNav({ goTo, scrolled }: { goTo: (path: string) => void; scrolled: b
       <div className={`mx-auto mt-2 max-w-[1240px] rounded-2xl border border-white/10 bg-black/95 shadow-2xl backdrop-blur-lg transition-all duration-500 ease-out lg:hidden ${menuOpen ? "translate-y-0 opacity-100" : "pointer-events-none -translate-y-4 opacity-0"}`}>
         <div className="flex flex-col p-3">
           {navItems.map((item, i) => (
-            <a
-              key={item.label}
-              href={item.href}
-              onClick={(e) => {
-                handleNavClick(e, item.href);
-                setMenuOpen(false);
-              }}
-              className="rounded-xl px-3 py-3 text-sm text-gray-300 transition-all duration-500 ease-out hover:bg-white/5 hover:text-white"
-              style={{ transitionDelay: menuOpen ? `${i * 50}ms` : "0ms", transform: menuOpen ? "translateX(0)" : "translateX(-16px)", opacity: menuOpen ? 1 : 0 }}
-            >
+            <a key={item.label} href={item.href} onClick={() => setMenuOpen(false)} className="rounded-xl px-3 py-3 text-sm text-gray-300 transition-all duration-500 ease-out hover:bg-white/5 hover:text-white" style={{ transitionDelay: menuOpen ? `${i * 50}ms` : "0ms", transform: menuOpen ? "translateX(0)" : "translateX(-16px)", opacity: menuOpen ? 1 : 0 }}>
               {item.label}
             </a>
           ))}

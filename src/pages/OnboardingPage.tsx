@@ -64,7 +64,6 @@ const iconPalette = [
 const TOTAL_STEPS = 3;
 
 export default function OnboardingPage() {
-  useLightModeOnly();
   const navigate = useNavigate();
   const { user } = useAuthStore();
   const [step, setStep] = useState(1);
