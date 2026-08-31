@@ -47,7 +47,9 @@ function useAvailableHeight<T extends HTMLElement>(bottomBuffer = 16) {
         setHeight(null);
         return;
       }
-      const top = ref.current.getBoundingClientRect().top;
+      const mainEl = ref.current.closest("main");
+      const scrollTop = mainEl ? mainEl.scrollTop : 0;
+      const top = ref.current.getBoundingClientRect().top + scrollTop;
       const parent = ref.current.parentElement;
       const parentPaddingBottom = parent
         ? parseFloat(window.getComputedStyle(parent).paddingBottom || "0")
@@ -97,9 +99,15 @@ export default function Playground() {
   // Regression Suite State
   const [regressionReport, setRegressionReport] = useState<any | null>(null);
 
-  const chatEndRef = useRef<HTMLDivElement>(null);
+  const chatFeedRef = useRef<HTMLDivElement>(null);
   const promptInputRef = useRef<HTMLInputElement>(null);
   const { ref: pageRef, height: pageHeight } = useAvailableHeight<HTMLDivElement>(16);
+
+  // Reset main container scroll position to top on mount
+  useEffect(() => {
+    const mainEl = pageRef.current?.closest("main");
+    if (mainEl) mainEl.scrollTop = 0;
+  }, []);
 
   // Fetch agents list
   const { data: agents = [] } = useQuery({
@@ -138,8 +146,11 @@ export default function Playground() {
     }
   }, [sessions, activeSessionId]);
 
+  // Scroll messages container internally without altering outer main scroll
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    if (chatFeedRef.current) {
+      chatFeedRef.current.scrollTop = chatFeedRef.current.scrollHeight;
+    }
   }, [activeSession?.messages, isStreaming]);
 
   const handleStartNewTestRun = async () => {
@@ -595,7 +606,7 @@ export default function Playground() {
           </div>
 
           {/* Test Messages Feed (scrollable) */}
-          <div className="flex-1 overflow-y-auto min-h-0 p-5 space-y-4">
+          <div ref={chatFeedRef} className="flex-1 overflow-y-auto min-h-0 p-5 space-y-4">
             {messages.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-full gap-3 text-center p-6">
                 <div className="h-12 w-12 rounded-full bg-accent-soft flex items-center justify-center text-accent">

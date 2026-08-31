@@ -59,7 +59,9 @@ function useAvailableHeight<T extends HTMLElement>(bottomBuffer = 16) {
         return;
       }
 
-      const top = ref.current.getBoundingClientRect().top;
+      const mainEl = ref.current.closest("main");
+      const scrollTop = mainEl ? mainEl.scrollTop : 0;
+      const top = ref.current.getBoundingClientRect().top + scrollTop;
       const parent = ref.current.parentElement;
       const parentPaddingBottom = parent
         ? parseFloat(window.getComputedStyle(parent).paddingBottom || "0")
@@ -89,10 +91,16 @@ export default function Conversations() {
   const [activeConvoId, setActiveConvoId] = useState<string | null>(urlConvoId || null);
   const [messageText, setMessageText] = useState<string>("");
 
-  const chatEndRef = useRef<HTMLDivElement>(null);
+  const chatFeedRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const { ref: pageRef, height: pageHeight } = useAvailableHeight<HTMLDivElement>(16);
+
+  // Reset main container scroll position to top on mount
+  useEffect(() => {
+    const mainEl = pageRef.current?.closest("main");
+    if (mainEl) mainEl.scrollTop = 0;
+  }, []);
 
   // Load agents list for filtering
   const { data: agents = [] } = useQuery({
@@ -135,8 +143,11 @@ export default function Conversations() {
     }
   }, [conversations, activeConvoId]);
 
+  // Scroll chat messages container internally without altering outer main scroll
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    if (chatFeedRef.current) {
+      chatFeedRef.current.scrollTop = chatFeedRef.current.scrollHeight;
+    }
   }, [activeConvo?.messages]);
 
   const handleSendHumanMessage = (e: React.FormEvent) => {
@@ -429,7 +440,7 @@ export default function Conversations() {
               )}
 
               {/* Message Feed (scrollable) */}
-              <div className="flex-1 overflow-y-auto min-h-0 p-5 space-y-4">
+              <div ref={chatFeedRef} className="flex-1 overflow-y-auto min-h-0 p-5 space-y-4">
                 {messages.length === 0 ? (
                   <div className="flex flex-col items-center justify-center h-full text-center gap-2 text-ink-faint">
                     <MessageSquare size={22} />

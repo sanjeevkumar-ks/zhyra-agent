@@ -103,7 +103,7 @@ export default function HelpCenter() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-[1fr_420px] gap-8 items-start">
+      <div className="grid gap-8 items-start">
         {/* Knowledge Base & FAQs */}
         <div className="space-y-6">
           <h3 className="text-base font-semibold text-ink">Frequently Asked Questions</h3>
@@ -151,7 +151,7 @@ export default function HelpCenter() {
         </div>
 
         {/* Contact Support Request Form */}
-        <Panel className="p-6">
+        {/* <Panel className="p-6">
           <div className="flex items-center gap-2 mb-4">
             <MessageSquare size={18} className="text-accent" />
             <h3 className="text-[15px] font-semibold text-ink">Submit Support Request</h3>
@@ -247,7 +247,7 @@ export default function HelpCenter() {
               </Button>
             </form>
           )}
-        </Panel>
+        </Panel> */}
       </div>
     </div>
   );
