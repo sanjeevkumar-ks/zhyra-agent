@@ -15,6 +15,8 @@ import {
   Users,
   BookOpen,
   Sparkles,
+  Plug,
+  ShieldCheck,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { ZhyraMark } from "../components/layout";
@@ -61,17 +63,46 @@ const iconPalette = [
   "bg-slate-100 text-slate-500",
 ];
 
-const TOTAL_STEPS = 3;
+const STORAGE_KEY = "zhyra_onboarding_progress";
+const TOTAL_STEPS = 4;
 
 export default function OnboardingPage() {
   const navigate = useNavigate();
   const { user } = useAuthStore();
+
   const [step, setStep] = useState(1);
   const [name, setName] = useState("");
   const [companyName, setCompanyName] = useState("");
   const [selectedRole, setSelectedRole] = useState("Founder");
   const [selectedCases, setSelectedCases] = useState<string[]>(["Customer Support"]);
   const [selectedPlan, setSelectedPlan] = useState("Starter");
+  const [authorizedIntegrations, setAuthorizedIntegrations] = useState<string[]>(["Web Widget"]);
+
+  // Restore onboarding progress from localStorage if available
+  useEffect(() => {
+    try {
+      const draft = localStorage.getItem(STORAGE_KEY);
+      if (draft) {
+        const parsed = JSON.parse(draft);
+        if (parsed.step) setStep(parsed.step);
+        if (parsed.name) setName(parsed.name);
+        if (parsed.companyName) setCompanyName(parsed.companyName);
+        if (parsed.selectedRole) setSelectedRole(parsed.selectedRole);
+        if (parsed.selectedCases) setSelectedCases(parsed.selectedCases);
+        if (parsed.selectedPlan) setSelectedPlan(parsed.selectedPlan);
+      }
+    } catch {}
+  }, []);
+
+  // Save progress state on step change
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify({ step, name, companyName, selectedRole, selectedCases, selectedPlan })
+      );
+    } catch {}
+  }, [step, name, companyName, selectedRole, selectedCases, selectedPlan]);
 
   useEffect(() => {
     if (user?.onboarded) {
@@ -82,11 +113,13 @@ export default function OnboardingPage() {
   const stepMeta = useMemo(() => {
     switch (step) {
       case 1:
-        return { eyebrow: "Welcome", title: "Tell us about yourself", subtitle: "A few basics to personalize your workspace." };
+        return { eyebrow: "Step 1 of 4", title: "Tell us about yourself", subtitle: "Basic details to personalize your AI workspace." };
       case 2:
-        return { eyebrow: "Use case", title: "What should Zhyra help with?", subtitle: "Pick one or more — you can change this later." };
+        return { eyebrow: "Step 2 of 4", title: "What should Zhyra help with?", subtitle: "Select your primary AI employee use cases." };
       case 3:
-        return { eyebrow: "Plan", title: "Choose a plan", subtitle: "Start free, upgrade anytime as your team grows." };
+        return { eyebrow: "Step 3 of 4", title: "Initial Channels & Permissions", subtitle: "Authorize deployment channels for your workspace." };
+      case 4:
+        return { eyebrow: "Step 4 of 4", title: "Choose a plan", subtitle: "Start free, upgrade anytime as your team grows." };
       default:
         return { eyebrow: "Done", title: "You're all set", subtitle: "" };
     }
@@ -94,6 +127,7 @@ export default function OnboardingPage() {
 
   const handleOnboardingComplete = async () => {
     try {
+      localStorage.removeItem(STORAGE_KEY);
       await apiClient.put("/api/users/me", {
         name: name || user?.name || "Member",
         onboarded: true,
@@ -123,9 +157,6 @@ export default function OnboardingPage() {
           backgroundSize: "56px 56px",
         }}
       />
-      {/* Soft ambient glows */}
-      <div className="pointer-events-none absolute -top-40 -left-40 h-96 w-96 rounded-full bg-accent/10 blur-[100px]" />
-      <div className="pointer-events-none absolute -bottom-40 -right-40 h-96 w-96 rounded-full bg-accent/10 blur-[100px]" />
 
       <div className="relative z-10 flex min-h-screen flex-col">
         {/* Top bar */}
@@ -134,9 +165,12 @@ export default function OnboardingPage() {
             <ZhyraMark size={22} />
             <span className="text-[13px] font-semibold tracking-tight text-ink">Zhyra AI</span>
           </div>
-          <Link to="/" className="text-[13px] text-ink-faint transition-colors hover:text-ink">
-            Back to site
-          </Link>
+          <button
+            onClick={handleOnboardingComplete}
+            className="text-[13px] text-ink-faint hover:text-ink transition-colors"
+          >
+            Skip for now
+          </button>
         </div>
 
         {/* Centered card */}
@@ -150,7 +184,7 @@ export default function OnboardingPage() {
               transition={{ duration: 0.2, ease: "easeOut" }}
               className={cn(
                 "w-full rounded-[28px] border border-black/[0.06] bg-white/95 p-8 shadow-[0_20px_60px_-24px_rgba(0,0,0,0.18)] backdrop-blur-sm sm:p-10",
-                step === 3 ? "max-w-2xl" : "max-w-xl",
+                step === 4 ? "max-w-2xl" : "max-w-xl",
               )}
             >
               {step <= TOTAL_STEPS && (
@@ -166,15 +200,15 @@ export default function OnboardingPage() {
                   <div className="space-y-4">
                     <Field label="Name" placeholder="Priya Sharma" value={name} onChange={(e) => setName(e.target.value)} />
                     <Field
-                      label="Company Name (optional)"
-                      placeholder="Aurora Clinic"
+                      label="Company / Workspace Name (optional)"
+                      placeholder="Aurora Technologies"
                       value={companyName}
                       onChange={(e) => setCompanyName(e.target.value)}
                     />
                   </div>
 
                   <div className="space-y-2.5">
-                    <label className="text-[12px] font-medium text-ink-faint">Role</label>
+                    <label className="text-[12px] font-medium text-ink-faint">Your Role</label>
                     <div className="flex flex-wrap gap-2">
                       {roles.map((role, i) => {
                         const active = selectedRole === role.label;
@@ -249,19 +283,46 @@ export default function OnboardingPage() {
                       );
                     })}
                   </div>
-
-                  <div className="space-y-2">
-                    <label className="text-[12px] font-medium text-ink-faint">Describe your use case (optional)</label>
-                    <textarea
-                      rows={3}
-                      placeholder="We want a voice receptionist that books appointments and answers common questions."
-                      className="w-full resize-none rounded-2xl border border-line/70 bg-canvas-alt/30 p-3.5 text-[13.5px] text-ink placeholder:text-ink-faint focus:border-accent/40 focus:outline-none"
-                    />
-                  </div>
                 </div>
               )}
 
               {step === 3 && (
+                <div className="space-y-4">
+                  <p className="text-[13px] text-ink-soft">Select the communication channels you plan to connect:</p>
+                  {[
+                    { id: "Web Widget", desc: "Embed real-time chat & voice widget on your website" },
+                    { id: "Voice Studio", desc: "Enable spoken phone calls & IVR answering" },
+                    { id: "WhatsApp Business", desc: "Automate messaging via official WhatsApp API" },
+                    { id: "Google Drive & Notion", desc: "Sync documents automatically into Knowledge Hub" },
+                  ].map((chan) => {
+                    const active = authorizedIntegrations.includes(chan.id);
+                    return (
+                      <button
+                        key={chan.id}
+                        onClick={() =>
+                          setAuthorizedIntegrations((prev) =>
+                            prev.includes(chan.id) ? prev.filter((c) => c !== chan.id) : [...prev, chan.id]
+                          )
+                        }
+                        className={cn(
+                          "flex w-full items-center justify-between rounded-xl border p-4 text-left transition-all",
+                          active ? "border-accent bg-accent/5" : "border-line bg-white hover:border-ink/20"
+                        )}
+                      >
+                        <div>
+                          <p className="text-[13.5px] font-semibold text-ink">{chan.id}</p>
+                          <p className="text-[12px] text-ink-soft">{chan.desc}</p>
+                        </div>
+                        <div className={cn("h-5 w-5 rounded-full border flex items-center justify-center", active ? "bg-accent border-accent text-white" : "border-line")}>
+                          {active && <Check size={12} />}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+
+              {step === 4 && (
                 <div className="space-y-3">
                   {plans.map((plan) => {
                     const active = selectedPlan === plan.name;
@@ -302,18 +363,17 @@ export default function OnboardingPage() {
                 </div>
               )}
 
-              {step === 4 && (
+              {step === 5 && (
                 <div className="py-2 text-center">
                   <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-accent-soft text-accent">
                     <Check size={20} />
                   </div>
-                  <p className="mt-5 text-[11px] font-semibold uppercase tracking-[0.14em] text-accent">Workspace created</p>
+                  <p className="mt-5 text-[11px] font-semibold uppercase tracking-[0.14em] text-accent">Workspace initialized</p>
                   <h1 className="mt-2 text-[24px] font-semibold leading-tight tracking-tight text-ink">
-                    You're ready to build your first AI employee.
+                    Your AI Workspace is configured and ready.
                   </h1>
                   <p className="mx-auto mt-3 max-w-sm text-[13.5px] leading-relaxed text-ink-soft">
-                    Zhyra created your workspace on the {selectedPlan} plan with {selectedCases.length} focus area
-                    {selectedCases.length > 1 ? "s" : ""}.
+                    Zhyra created your workspace on the {selectedPlan} plan.
                   </p>
                   <div className="mt-7 flex flex-col justify-center gap-2.5 sm:flex-row">
                     <Button onClick={handleOnboardingComplete}>Go to Dashboard</Button>

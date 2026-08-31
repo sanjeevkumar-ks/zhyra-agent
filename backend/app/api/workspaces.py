@@ -18,6 +18,12 @@ async def get_workspace(workspace_id: str = Depends(get_user_workspace_id)):
     """Fetches general settings metadata for workspace."""
     return await WorkspaceService.get_workspace(workspace_id)
 
+@router.post("/provision-zhyra")
+async def provision_zhyra(workspace_id: str = Depends(get_user_workspace_id)):
+    """Auto-provisions the Zhyra Master Agent for the authenticated workspace."""
+    from app.services.agent_service import AgentService
+    return await AgentService.provision_zhyra_master_agent(workspace_id)
+
 @router.put("/me", response_model=WorkspaceResponse)
 async def update_workspace(
     payload: WorkspaceUpdate,

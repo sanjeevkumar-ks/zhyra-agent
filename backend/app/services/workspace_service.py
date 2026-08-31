@@ -9,7 +9,13 @@ class WorkspaceService:
         snap = doc_ref.get()
         if not snap.exists:
             raise HTTPException(status_code=404, detail=f"Workspace {workspace_id} not found.")
-        return snap.to_dict()
+        
+        data = snap.to_dict()
+        if "zhyra_agent_id" not in data:
+            from app.services.agent_service import AgentService
+            zhyra = await AgentService.provision_zhyra_master_agent(workspace_id)
+            data["zhyra_agent_id"] = zhyra["id"]
+        return data
 
     @staticmethod
     async def update_workspace(workspace_id: str, update_data: dict) -> dict:

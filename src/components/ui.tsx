@@ -30,7 +30,7 @@ export function Badge({
   className,
 }: {
   children: ReactNode;
-  tone?: "neutral" | "accent" | "violet" | "emerald" | "amber" | "rose";
+  tone?: "neutral" | "accent" | "violet" | "emerald" | "amber" | "rose" | "indigo";
   className?: string;
 }) {
   const tones: Record<string, string> = {
@@ -40,6 +40,7 @@ export function Badge({
     emerald: "bg-emerald-soft text-emerald",
     amber: "bg-amber-soft text-amber",
     rose: "bg-rose-soft text-rose",
+    indigo: "bg-indigo-500/15 text-indigo-400 border border-indigo-500/20",
   };
   return (
     <span

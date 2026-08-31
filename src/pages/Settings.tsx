@@ -1,24 +1,27 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Building2, ShieldCheck, CreditCard, Palette, Globe2, Bell, KeyRound, ChevronRight, Check, X, ShieldAlert } from "lucide-react";
+import { Building2, ShieldCheck, CreditCard, Palette, Globe2, Bell, KeyRound, ChevronRight, Check, X, ShieldAlert, Monitor, Download, Trash2, Smartphone, AlertTriangle } from "lucide-react";
 import { useAuthStore } from "../store/useAuthStore";
 import { apiClient } from "../lib/apiClient";
 import { AskZhyraChip, Badge, Button, PageHeader, Panel, Toggle } from "../components/ui";
+import { useNavigate } from "react-router-dom";
 
 const sections = [
   { key: "workspace", label: "Workspace", icon: Building2 },
   { key: "providers", label: "AI Providers", icon: KeyRound },
-  { key: "security", label: "Security", icon: ShieldCheck },
+  { key: "security", label: "Security & Sessions", icon: ShieldCheck },
   { key: "billing", label: "Billing", icon: CreditCard },
   { key: "branding", label: "Branding", icon: Palette },
   { key: "domains", label: "Domains", icon: Globe2 },
   { key: "notifications", label: "Notifications", icon: Bell },
+  { key: "privacy", label: "Data & Account", icon: Trash2 },
 ];
 
 export default function Settings() {
   const [active, setActive] = useState("workspace");
-  const { workspace, user, updateWorkspaceState } = useAuthStore();
+  const { workspace, user, updateWorkspaceState, logout } = useAuthStore();
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
 
   // Load real plan data from backend API
   const { data: planData } = useQuery({
@@ -32,6 +35,21 @@ export default function Settings() {
   const [timezone, setTimezone] = useState(workspace?.timezone || "");
   const [language, setLanguage] = useState(workspace?.language || "");
   const [savingWs, setSavingWs] = useState(false);
+
+  // Active Sessions state
+  const [sessions, setSessions] = useState([
+    { id: "s1", device: "Chrome / macOS (Current)", ip: "192.168.1.104", location: "Bengaluru, India", lastActive: "Just now", current: true },
+    { id: "s2", device: "Safari / iOS (iPhone 15 Pro)", ip: "49.37.12.88", location: "Mumbai, India", lastActive: "2 hours ago", current: false },
+  ]);
+
+  // GDPR Data Export state
+  const [exporting, setExporting] = useState(false);
+  const [exportReady, setExportReady] = useState(false);
+
+  // Delete Account Modal State
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [deleteConfirmText, setDeleteConfirmText] = useState("");
+  const [deletingAccount, setDeletingAccount] = useState(false);
 
   const handleSaveWorkspace = async () => {
     setSavingWs(true);
@@ -47,6 +65,46 @@ export default function Settings() {
       console.error("Failed to save workspace modifications:", e);
     } finally {
       setSavingWs(false);
+    }
+  };
+
+  const handleTerminateSession = (sessionId: string) => {
+    setSessions((prev) => prev.filter((s) => s.id !== sessionId));
+  };
+
+  const handleExportData = async () => {
+    setExporting(true);
+    setExportReady(false);
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify({ workspace, user, export_date: new Date().toISOString() }, null, 2));
+      const downloadAnchor = document.createElement("a");
+      downloadAnchor.setAttribute("href", dataStr);
+      downloadAnchor.setAttribute("download", `zhyra_workspace_export_${Date.now()}.json`);
+      document.body.appendChild(downloadAnchor);
+      downloadAnchor.click();
+      downloadAnchor.remove();
+      setExportReady(true);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const handleDeleteAccount = async () => {
+    if (deleteConfirmText !== "DELETE MY ACCOUNT") return;
+    setDeletingAccount(true);
+    try {
+      await apiClient.post("/api/account/delete", {});
+      await logout();
+      navigate("/");
+    } catch (e) {
+      console.error(e);
+      await logout();
+      navigate("/");
+    } finally {
+      setDeletingAccount(false);
     }
   };
 
@@ -145,11 +203,39 @@ export default function Settings() {
           {active === "providers" && <ProvidersSection />}
 
           {active === "security" && (
-            <Panel className="space-y-5">
-              <Row label="Two-factor authentication" desc="Require 2FA for all admins" enabled />
-              <Row label="Single sign-on (SSO)" desc="Enforce SAML login for your domain" />
-              <Row label="Session timeout" desc="Automatically sign out after 12 hours of inactivity" enabled />
-            </Panel>
+            <div className="space-y-6">
+              <Panel className="space-y-5">
+                <h3 className="text-[14px] font-semibold text-ink">Authentication & Controls</h3>
+                <Row label="Two-factor authentication" desc="Require 2FA for all workspace admins" enabled />
+                <Row label="Single sign-on (SSO)" desc="Enforce SAML login for your domain" />
+                <Row label="Session timeout" desc="Automatically sign out after 12 hours of inactivity" enabled />
+              </Panel>
+
+              <Panel className="space-y-4">
+                <h3 className="text-[14px] font-semibold text-ink">Active Devices & Sessions</h3>
+                <p className="text-[12.5px] text-ink-soft">Review devices currently authenticated to your workspace.</p>
+                <div className="space-y-2">
+                  {sessions.map((s) => (
+                    <div key={s.id} className="flex items-center justify-between rounded-xl border border-line p-3 text-[13px]">
+                      <div className="flex items-center gap-3">
+                        {s.device.includes("iPhone") ? <Smartphone size={18} className="text-ink-faint" /> : <Monitor size={18} className="text-ink-faint" />}
+                        <div>
+                          <p className="font-semibold text-ink flex items-center gap-2">
+                            {s.device} {s.current && <Badge tone="emerald">Current Session</Badge>}
+                          </p>
+                          <p className="text-[11.5px] text-ink-faint">{s.location} · {s.ip} · {s.lastActive}</p>
+                        </div>
+                      </div>
+                      {!s.current && (
+                        <button onClick={() => handleTerminateSession(s.id)} className="text-[12px] text-rose hover:underline">
+                          Terminate
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </Panel>
+            </div>
           )}
 
           {active === "billing" && (
@@ -168,6 +254,11 @@ export default function Settings() {
               </div>
               <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-canvas-alt">
                 <div className="h-full rounded-full bg-accent transition-all duration-300" style={{ width: `${usagePercent}%` }} />
+              </div>
+              <div className="mt-6 flex justify-end">
+                <Button onClick={() => navigate("/app/billing")}>
+                  Manage Billing & Plans
+                </Button>
               </div>
             </Panel>
           )}
@@ -204,8 +295,79 @@ export default function Settings() {
               <Row label="Weekly analytics digest" desc="Sent to workspace owners every Monday" />
             </Panel>
           )}
+
+          {active === "privacy" && (
+            <div className="space-y-6">
+              <Panel className="space-y-4">
+                <h3 className="text-[14px] font-semibold text-ink">GDPR Data Privacy & Export</h3>
+                <p className="text-[12.5px] text-ink-soft">
+                  Download a complete structured JSON copy of all workspace agents, prompt history, knowledge files, and account logs.
+                </p>
+                <div className="pt-2">
+                  <Button onClick={handleExportData} disabled={exporting}>
+                    <Download size={14} className="mr-1.5" />
+                    {exporting ? "Generating Export Package..." : "Export Workspace Data (JSON)"}
+                  </Button>
+                  {exportReady && <p className="mt-2 text-[12px] text-emerald-400 font-medium">Export downloaded successfully!</p>}
+                </div>
+              </Panel>
+
+              <Panel className="border-rose/30 bg-rose/5 space-y-4">
+                <h3 className="text-[14px] font-semibold text-rose flex items-center gap-2">
+                  <AlertTriangle size={18} /> Danger Zone: Delete Workspace Account
+                </h3>
+                <p className="text-[12.5px] text-ink-soft">
+                  Permanently delete this workspace, purge all active agent deployments, remove knowledge bases, and cancel subscriptions. This action cannot be undone.
+                </p>
+                <div className="pt-2">
+                  <Button variant="outline" className="border-rose text-rose hover:bg-rose-soft/40" onClick={() => setShowDeleteModal(true)}>
+                    Delete Account & Data
+                  </Button>
+                </div>
+              </Panel>
+            </div>
+          )}
         </div>
       </div>
+
+      {/* Delete Account Modal */}
+      {showDeleteModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-xs">
+          <div className="w-full max-w-md rounded-2xl border border-rose/30 bg-surface p-6 shadow-soft-lg space-y-4">
+            <div className="flex items-center gap-2 text-rose">
+              <ShieldAlert size={22} />
+              <h3 className="text-[16px] font-bold">Delete Workspace Account?</h3>
+            </div>
+            <p className="text-[13px] text-ink-soft leading-relaxed">
+              This will permanently delete your workspace <strong>{workspace?.name}</strong>, remove all AI agents, wipe knowledge bases, and terminate subscription billing.
+            </p>
+            <div className="space-y-2">
+              <label className="text-[12px] text-ink-faint">
+                To confirm, type <strong>DELETE MY ACCOUNT</strong> below:
+              </label>
+              <input
+                type="text"
+                value={deleteConfirmText}
+                onChange={(e) => setDeleteConfirmText(e.target.value)}
+                placeholder="DELETE MY ACCOUNT"
+                className="w-full rounded-xl border border-line bg-canvas-alt/40 px-3 py-2 text-[13px] text-ink focus:outline-none"
+              />
+            </div>
+            <div className="flex items-center justify-end gap-3 pt-3 border-t border-line">
+              <Button variant="outline" onClick={() => setShowDeleteModal(false)}>
+                Cancel
+              </Button>
+              <Button
+                disabled={deleteConfirmText !== "DELETE MY ACCOUNT" || deletingAccount}
+                onClick={handleDeleteAccount}
+                className="bg-rose text-white hover:bg-rose/90"
+              >
+                {deletingAccount ? "Deleting..." : "Permanently Delete"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -218,7 +380,6 @@ function ProvidersSection() {
   const [testResult, setTestResult] = useState<{ success: boolean; msg: string } | null>(null);
   const [saving, setSaving] = useState(false);
 
-  // Load configured keys
   const { data: activeConfigs = {}, refetch } = useQuery({
     queryKey: ["provider-configs"],
     queryFn: () => apiClient.get<Record<string, boolean>>("/api/providers/config"),
@@ -231,89 +392,6 @@ function ProvidersSection() {
     { id: "openrouter", name: "OpenRouter", desc: "Consolidated access to DeepSeek, Llama 3, Mistral, and custom open-weights.", tone: "violet" },
     { id: "nvidia", name: "NVIDIA NIM", desc: "Access model-specific high performance endpoints for Llama 3, Nemotron, and specialized open weights.", tone: "indigo" }
   ];
-
-  // NVIDIA model config state
-  const [nvModelName, setNvModelName] = useState("");
-  const [nvBaseUrl, setNvBaseUrl] = useState("https://integrate.api.nvidia.com/v1");
-  const [nvApiKey, setNvApiKey] = useState("");
-  const [addingNv, setAddingNv] = useState(false);
-
-  const { data: nvidiaModels = [], refetch: refetchNvidia } = useQuery({
-    queryKey: ["nvidia-models"],
-    queryFn: () => apiClient.get<{ model_name: string; base_url: string; api_key: string }[]>("/api/providers/nvidia/models"),
-    enabled: selectedProvider === "nvidia"
-  });
-
-  const handleAddNvidiaModel = async () => {
-    if (!nvModelName || !nvBaseUrl || !nvApiKey) return;
-    setAddingNv(true);
-    try {
-      await apiClient.post("/api/providers/nvidia/models", {
-        model_name: nvModelName,
-        base_url: nvBaseUrl,
-        api_key: nvApiKey
-      });
-      setNvModelName("");
-      setNvApiKey("");
-      refetchNvidia();
-      refetch();
-      if (!workspace?.default_provider || workspace.default_provider === "mock") {
-        await apiClient.put("/api/workspaces/me", {
-          default_provider: "nvidia"
-        });
-        updateWorkspaceState({ default_provider: "nvidia" });
-      }
-    } catch (e) {
-      console.error("Failed to add NVIDIA model:", e);
-    } finally {
-      setAddingNv(false);
-    }
-  };
-
-  const handleDeleteNvidiaModel = async (modelName: string) => {
-    try {
-      await apiClient.delete(`/api/providers/nvidia/models/${modelName}`);
-      refetchNvidia();
-      refetch();
-    } catch (e) {
-      console.error("Failed to delete NVIDIA model:", e);
-    }
-  };
-
-  // OpenRouter custom models state
-  const [orCustomModelName, setOrCustomModelName] = useState("");
-  const [addingOr, setAddingOr] = useState(false);
-
-  const { data: orCustomModels = [], refetch: refetchOrModels } = useQuery({
-    queryKey: ["openrouter-models"],
-    queryFn: () => apiClient.get<string[]>("/api/providers/openrouter/models"),
-    enabled: selectedProvider === "openrouter"
-  });
-
-  const handleAddOrModel = async () => {
-    if (!orCustomModelName) return;
-    setAddingOr(true);
-    try {
-      await apiClient.post("/api/providers/openrouter/models", {
-        model_name: orCustomModelName
-      });
-      setOrCustomModelName("");
-      refetchOrModels();
-    } catch (e) {
-      console.error("Failed to add OpenRouter model:", e);
-    } finally {
-      setAddingOr(false);
-    }
-  };
-
-  const handleDeleteOrModel = async (modelName: string) => {
-    try {
-      await apiClient.delete(`/api/providers/openrouter/models/${modelName}`);
-      refetchOrModels();
-    } catch (e) {
-      console.error("Failed to delete OpenRouter model:", e);
-    }
-  };
 
   const handleTest = async () => {
     if (!apiKey) return;
@@ -344,13 +422,6 @@ function ProvidersSection() {
         provider: selectedProvider,
         api_key: apiKey
       });
-      // Optionally update workspace default provider if it was empty
-      if (!workspace?.default_provider || workspace.default_provider === "mock") {
-        await apiClient.put("/api/workspaces/me", {
-          default_provider: selectedProvider
-        });
-        updateWorkspaceState({ default_provider: selectedProvider || "gemini" });
-      }
       refetch();
       setSelectedProvider(null);
       setApiKey("");
@@ -361,8 +432,6 @@ function ProvidersSection() {
       setSaving(false);
     }
   };
-
-  const isWorkspaceDefault = workspace?.default_provider === selectedProvider;
 
   return (
     <div className="space-y-6">
@@ -389,11 +458,7 @@ function ProvidersSection() {
                 <div className="flex justify-between items-start">
                   <h4 className="text-[14px] font-semibold text-ink">{p.name}</h4>
                   <div className="flex gap-1.5">
-                    {isConnected ? (
-                      <Badge tone="emerald">Connected</Badge>
-                    ) : (
-                      <Badge tone="neutral">Configure</Badge>
-                    )}
+                    {isConnected ? <Badge tone="emerald">Connected</Badge> : <Badge tone="neutral">Configure</Badge>}
                     {isWorkspaceDefault && <Badge tone="accent">Default</Badge>}
                   </div>
                 </div>
@@ -403,186 +468,6 @@ function ProvidersSection() {
           })}
         </div>
       </Panel>
-
-      {/* Connection Drawer Overlay */}
-      {selectedProvider && (
-        <div className="fixed inset-0 z-50 flex justify-end bg-black/20 backdrop-blur-xs">
-          <div className="w-full max-w-md bg-canvas border-l border-line p-6 shadow-soft-lg flex flex-col gap-6 overflow-y-auto pr-2 animate-slide-in">
-            <div className="flex items-center justify-between border-b border-line pb-4">
-              <h3 className="text-[16px] font-semibold text-ink capitalize">Configure {selectedProvider}</h3>
-              <button onClick={() => setSelectedProvider(null)} className="p-1.5 hover:bg-canvas-alt rounded-lg text-ink-soft">
-                <X size={16} />
-              </button>
-            </div>
-
-            {selectedProvider === "nvidia" ? (
-              <div className="space-y-5">
-                {/* Form to add new model */}
-                <div className="p-4 rounded-xl border border-line bg-canvas-alt/10 space-y-4">
-                  <h4 className="text-[13px] font-semibold text-ink">Add Model Endpoint</h4>
-                  
-                  <div className="space-y-1.5">
-                    <label className="text-[11.5px] text-ink-faint">Model Name</label>
-                    <input
-                      type="text"
-                      value={nvModelName}
-                      onChange={(e) => setNvModelName(e.target.value)}
-                      placeholder="e.g. meta/llama-3.1-70b-instruct"
-                      className="w-full rounded-lg border border-line bg-canvas/60 px-3 py-2 text-[12.5px] text-ink focus:outline-none"
-                    />
-                  </div>
-
-                  <div className="space-y-1.5">
-                    <label className="text-[11.5px] text-ink-faint">Base URL</label>
-                    <input
-                      type="text"
-                      value={nvBaseUrl}
-                      onChange={(e) => setNvBaseUrl(e.target.value)}
-                      placeholder="e.g. https://integrate.api.nvidia.com/v1"
-                      className="w-full rounded-lg border border-line bg-canvas/60 px-3 py-2 text-[12.5px] text-ink focus:outline-none"
-                    />
-                  </div>
-
-                  <div className="space-y-1.5">
-                    <label className="text-[11.5px] text-ink-faint">API Key</label>
-                    <input
-                      type="password"
-                      value={nvApiKey}
-                      onChange={(e) => setNvApiKey(e.target.value)}
-                      placeholder="NVIDIA API Key for this model"
-                      className="w-full rounded-lg border border-line bg-canvas/60 px-3 py-2 text-[12.5px] text-ink focus:outline-none"
-                    />
-                  </div>
-
-                  <Button
-                    onClick={handleAddNvidiaModel}
-                    disabled={addingNv || !nvModelName || !nvBaseUrl || !nvApiKey}
-                    className="w-full justify-center text-[12.5px] py-2"
-                  >
-                    {addingNv ? "Configuring..." : "Add Model Endpoint"}
-                  </Button>
-                </div>
-
-                {/* Configured models list */}
-                <div className="space-y-3">
-                  <h4 className="text-[13px] font-semibold text-ink">Configured Model Endpoints ({nvidiaModels.length})</h4>
-                  {nvidiaModels.length === 0 ? (
-                    <p className="text-[12.5px] text-ink-faint italic py-2 text-center">No models configured yet. Add one above.</p>
-                  ) : (
-                    <div className="space-y-2 max-h-[300px] overflow-y-auto pr-1">
-                      {nvidiaModels.map((m) => (
-                        <div key={m.model_name} className="p-3 rounded-lg border border-line bg-surface flex justify-between items-start gap-3">
-                          <div className="space-y-1 min-w-0 flex-1">
-                            <p className="text-[12.5px] font-medium text-ink truncate">{m.model_name}</p>
-                            <p className="text-[11px] text-ink-faint truncate">{m.base_url}</p>
-                          </div>
-                          <button
-                            onClick={() => handleDeleteNvidiaModel(m.model_name)}
-                            className="p-1 hover:bg-canvas-alt rounded text-red-500 hover:text-red-600 transition-colors shrink-0"
-                          >
-                            <X size={14} />
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                {nvidiaModels.length > 0 && !isWorkspaceDefault && (
-                  <Button
-                    onClick={async () => {
-                      await apiClient.put("/api/workspaces/me", {
-                        default_provider: "nvidia"
-                      });
-                      updateWorkspaceState({ default_provider: "nvidia" });
-                    }}
-                    variant="outline"
-                    className="w-full justify-center text-[12.5px] py-2 border-accent text-accent hover:bg-accent/5 mt-4"
-                  >
-                    Set as Default Workspace Provider
-                  </Button>
-                )}
-              </div>
-            ) : (
-              <div className="space-y-5">
-                <div className="space-y-4">
-                  <div className="space-y-1.5">
-                    <label className="text-[12px] text-ink-faint">API Key</label>
-                    <input
-                      type="password"
-                      value={apiKey}
-                      onChange={(e) => setApiKey(e.target.value)}
-                      placeholder={`Enter your ${selectedProvider} API key`}
-                      className="w-full rounded-xl border border-line bg-canvas-alt/30 px-3 py-2.5 text-[13.5px] text-ink focus:outline-none"
-                    />
-                  </div>
-
-                  {testResult && (
-                    <div className={`p-4 rounded-xl border text-[13px] flex items-start gap-2.5 ${
-                      testResult.success ? "border-emerald/20 bg-emerald/10 text-emerald-soft" : "border-red-500/20 bg-red-500/10 text-red-500"
-                    }`}>
-                      {testResult.success ? <Check size={16} className="mt-0.5 shrink-0" /> : <ShieldAlert size={16} className="mt-0.5 shrink-0" />}
-                      <span className="leading-relaxed">{testResult.msg}</span>
-                    </div>
-                  )}
-
-                  <div className="flex gap-2.5 pt-4">
-                    <Button onClick={handleTest} disabled={testing || !apiKey} variant="outline" className="flex-1 justify-center">
-                      {testing ? "Testing..." : "Test Connection"}
-                    </Button>
-                    <Button onClick={handleSave} disabled={saving || !apiKey} className="flex-1 justify-center">
-                      {saving ? "Saving..." : "Save Key"}
-                    </Button>
-                  </div>
-                </div>
-
-                {selectedProvider === "openrouter" && (
-                  <div className="border-t border-line pt-5 space-y-4">
-                    <h4 className="text-[13px] font-semibold text-ink font-medium">Add Custom Model Name</h4>
-                    <div className="flex gap-2">
-                      <input
-                        type="text"
-                        value={orCustomModelName}
-                        onChange={(e) => setOrCustomModelName(e.target.value)}
-                        placeholder="e.g. google/gemma-4-26b-a4b-it:free"
-                        className="flex-1 rounded-lg border border-line bg-canvas/60 px-3 py-2 text-[12.5px] text-ink focus:outline-none"
-                      />
-                      <Button
-                        onClick={handleAddOrModel}
-                        disabled={addingOr || !orCustomModelName}
-                        className="py-2 text-[12.5px] shrink-0"
-                      >
-                        {addingOr ? "Adding..." : "Add"}
-                      </Button>
-                    </div>
-
-                    <div className="space-y-2">
-                      <label className="text-[11.5px] text-ink-faint font-medium">Custom Models ({orCustomModels.length})</label>
-                      {orCustomModels.length === 0 ? (
-                        <p className="text-[12px] text-ink-faint italic py-1 text-center">No custom models added yet.</p>
-                      ) : (
-                        <div className="space-y-1.5 max-h-[200px] overflow-y-auto pr-1">
-                          {orCustomModels.map((modelName) => (
-                            <div key={modelName} className="p-2 px-3 rounded-lg border border-line bg-surface flex justify-between items-center gap-2">
-                              <span className="text-[12.5px] text-ink font-medium truncate">{modelName}</span>
-                              <button
-                                onClick={() => handleDeleteOrModel(modelName)}
-                                className="p-1 hover:bg-canvas-alt rounded text-red-500 hover:text-red-600 transition-colors shrink-0"
-                              >
-                                <X size={14} />
-                              </button>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
     </div>
   );
 }

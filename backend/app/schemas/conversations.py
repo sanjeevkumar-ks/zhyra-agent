@@ -50,8 +50,8 @@ class AssignRequest(BaseModel):
 class ConversationResponse(ConversationBase):
     id: str
     workspace_id: str
-    preview: str
-    time: str  # e.g., "2m" or timestamp
+    preview: Optional[str] = "No messages yet."
+    time: Optional[str] = "Just now"
     unread: bool = False
     messages: List[MessageResponse] = Field(default_factory=list)
     intent: str = "General inquiry"

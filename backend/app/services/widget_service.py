@@ -50,7 +50,7 @@ INIT_LIMITER = RateLimiter(max_calls=60, window_seconds=3600)      # 60 sessions
 MESSAGE_LIMITER = RateLimiter(max_calls=30, window_seconds=60)     # 30 messages per session/minute
 
 
-def validate_domain_allowlist(origin: str, allowed_domains: List[str]) -> bool:
+def validate_domain_allowlist(origin: str, allowed_domains) -> bool:
     """Validates a request origin against the deployment's allowed domains."""
     if not origin:
         return True
@@ -61,8 +61,13 @@ def validate_domain_allowlist(origin: str, allowed_domains: List[str]) -> bool:
     if any(loc in origin_clean for loc in ["localhost", "127.0.0.1", "zhyra.web.app", "zhyra-e0d80.web.app", "vercel.app"]):
         return True
 
+    # Normalize allowed_domains to a list
+    if isinstance(allowed_domains, str):
+        allowed_domains = [d.strip() for d in allowed_domains.split(",") if d.strip()]
+
     if not allowed_domains or "*" in allowed_domains:
         return True
+
 
     for domain in allowed_domains:
         d_clean = domain.lower().strip()
@@ -162,6 +167,7 @@ class WidgetService:
                 "customer": page_title or "Website Visitor",
                 "channel": "Web Chat",
                 "status": "active",
+                "time": time.strftime("%I:%M %p"),
                 "messages": [
                     {
                         "id": "msg_wgt_welcome",

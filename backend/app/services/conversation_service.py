@@ -10,6 +10,104 @@ from app.providers.manager import ProviderManager
 from app.utils.logger import log_info, log_error
 
 class ConversationService:
+
+    # ------------------------------------------------------------------ #
+    # Static helpers required by agent_graph.py finalize_node and         #
+    # response_formatter.py.  These were missing and caused an            #
+    # AttributeError on every single message, making every agent reply    #
+    # return terminal_state="FAILED".                                     #
+    # ------------------------------------------------------------------ #
+
+    @staticmethod
+    def sanitize_tool_call_text(text: str) -> str:
+        """Strip any raw TOOL_CALL:{...} JSON blobs the LLM may emit verbatim."""
+        import re
+        return re.sub(r'TOOL_CALL:\{.*?\}', '', text or '', flags=re.DOTALL).strip()
+
+    @staticmethod
+    def _enforce_verification_gate(
+        message: str,
+        tool_records=None,
+        tool_result=None,
+        query: str = "",
+    ) -> str:
+        """Structural action-success gate. Delegates to app.ai.gate.enforce_action_gate.
+
+        When no query is given (e.g. from unit tests), the message text itself
+        is used to detect action intent, so success claims are correctly blocked
+        even without a separate user query string.
+        """
+        from app.ai.gate import enforce_action_gate
+        effective_query = query or message or ""
+        return enforce_action_gate(message, effective_query, tool_records, tool_result)
+
+
+    @staticmethod
+    def build_action_state(tool_records=None):
+        """Structured action-state list for the frontend. Delegates to app.ai.gate."""
+        from app.ai.gate import build_action_state
+        return build_action_state(tool_records)
+
+    @staticmethod
+    def _parse_tool_call(text: str):
+        """Parse a legacy text-format TOOL_CALL:{...} blob into a normalized dict.
+
+        Resolves the raw tool name through the ToolExecutor TOOL_DISPATCHER to
+        return the canonical integration name and action method. Returns a dict:
+          ``tool``    — integration display name (e.g. "GoogleCalendar")
+          ``method``  — action method (e.g. "create_event")
+          ``args``    — arguments dict
+        Returns ``None`` if the text does not contain a valid TOOL_CALL blob.
+        Used by providers that fall back to text-mode tool calling.
+        """
+        import re
+        import json
+        if not text:
+            return None
+        m = re.search(r'TOOL_CALL:\s*(\{.*\})', text, re.DOTALL)
+        if not m:
+            return None
+        try:
+            data = json.loads(m.group(1))
+        except (json.JSONDecodeError, ValueError):
+            return None
+
+        raw_tool = data.get("tool") or ""
+        args = data.get("args") or {}
+
+        # Resolve through TOOL_DISPATCHER to get integration name and action
+        try:
+            from app.services.tool_executor import ToolExecutor
+            entry = ToolExecutor.TOOL_DISPATCHER.get(raw_tool)
+            if entry:
+                # entry = (integration_id, action) — but we need the display name
+                # Look up in dispatcher to find a key like "GoogleCalendar.create_event"
+                action = entry[1]
+                # Find the display-name key with this action
+                for key, val in ToolExecutor.TOOL_DISPATCHER.items():
+                    if val[1] == action and val[0] == entry[0] and "." in key:
+                        integration_name = key.split(".")[0]
+                        if not integration_name.startswith(("calendar_", "gcal_", "gmail_", "google_")):
+                            return {"tool": integration_name, "method": action, "args": args}
+        except Exception:
+            pass
+
+        # Fallback: try tool_registry canonical
+        try:
+            from app.ai.tools import tool_registry as _tr
+            resolved = _tr.resolve(raw_tool)
+            if resolved:
+                canonical = resolved.get("canonical", raw_tool)
+                if "." in canonical:
+                    _, action = canonical.split(".", 1)
+                else:
+                    action = data.get("method") or "execute"
+                return {"tool": raw_tool, "method": action, "args": args}
+        except Exception:
+            pass
+
+        return {"tool": raw_tool, "method": data.get("method") or "execute", "args": args}
+
     @staticmethod
     async def list_conversations(
         workspace_id: str,
@@ -59,10 +157,38 @@ class ConversationService:
                 if not (s_query in customer_name or s_query in agent_name or s_query in preview or s_query in convo_id or s_query in msg_texts):
                     continue
 
+            # Normalize the "time" field for Pydantic schema validation
+            if not data.get("time"):
+                ts = data.get("created_at") or data.get("updated_at")
+                if ts:
+                    try:
+                        import datetime
+                        dt = datetime.datetime.fromtimestamp(float(ts))
+                        data["time"] = dt.strftime("%I:%M %p")
+                    except Exception:
+                        data["time"] = "Just now"
+                else:
+                    data["time"] = "Just now"
+
             results.append(data)
 
-        sorted_results = sorted(results, key=lambda x: x.get("time", ""), reverse=True)
+        def sort_key(x):
+            ts = x.get("updated_at") or x.get("created_at")
+            if ts is not None:
+                try:
+                    return float(ts)
+                except (ValueError, TypeError):
+                    pass
+            t_str = x.get("time")
+            if t_str:
+                if "just now" in str(t_str).lower():
+                    return time.time()
+                return 1.0
+            return 0.0
+
+        sorted_results = sorted(results, key=sort_key, reverse=True)
         return sorted_results[:limit]
+
 
     @staticmethod
     async def get_conversation(workspace_id: str, convo_id: str) -> dict:
@@ -141,6 +267,8 @@ class ConversationService:
             "assigned_to": None,
             "preview": "No messages yet.",
             "time": "Just now",
+            "created_at": time.time(),
+            "updated_at": time.time(),
             "unread": False,
             "messages": [],
             "intent": "Inquire",

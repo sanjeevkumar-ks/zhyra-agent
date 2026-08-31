@@ -139,6 +139,23 @@ class ToolExecutor:
         record.integration_id = integration_id
         record.action = action
 
+        # Handle platform tools execution directly here
+        if integration_id == "platform":
+            if mode == "simulation":
+                return cls._finalize_simulated(record, action, tool_call.args, started)
+            
+            record.status = "EXECUTING"
+            try:
+                from app.ai.tools.platform_tools import PlatformToolExecutor
+                result = await PlatformToolExecutor.execute(workspace_id, action, tool_call.args)
+                if isinstance(result, dict):
+                    return cls._record_from_dict(record, result, started)
+                return cls._finalize(record, "FAILED", "UNVERIFIED_RESPONSE",
+                                     "Platform execution returned an unverifiable response type.", started)
+            except Exception as e:
+                log_error(f"Platform tool execution error for {tool_call.name}.{action}", exc=e)
+                return cls._finalize(record, "FAILED", "EXECUTION_ERROR", str(e), started)
+
         # 3. Lightweight connection / assignment check (no network)
         from app.ai.integration.preflight import IntegrationPreflight
         preflight = await IntegrationPreflight.check(workspace_id, agent_id, integration_id, lightweight=True)

@@ -14,7 +14,7 @@ from app.api import (
     auth, users, workspaces, agents, conversations,
     knowledge, voice, settings, providers, integrations,
     billing, analytics, memory, team, workflows, context, notifications, widget,
-    admin_debug, playground,
+    admin_debug, playground, zhyra, master_agent,
 )
 from app.api import channels as channels_api
 from app.api import telegram as telegram_webhook
@@ -141,6 +141,9 @@ app.include_router(widget.router, prefix="/api/widget", tags=["Embeddable Widget
 app.include_router(widget.router, prefix="/api/chat", tags=["Widget Chat Alias"])
 app.include_router(widget.router, prefix="/api", tags=["Widget Direct Alias"])
 app.include_router(playground.router, prefix="/api/playground", tags=["AI Testing Playground"])
+app.include_router(master_agent.router, prefix="/api/master-agent", tags=["Master Agent Architecture"])
+app.include_router(zhyra.router, prefix="/api/zhyra", tags=["Zhyra Master Agent"])
+app.include_router(zhyra.router, prefix="/api/assistant", tags=["Zhyra Legacy Assistant"])
 app.include_router(admin_auth.router, prefix="/api/admin/auth", tags=["Admin Auth"])
 app.include_router(admin_users.router, prefix="/api/admin/users", tags=["Admin Users"])
 app.include_router(admin_invites.router, prefix="/api/admin/invites", tags=["Admin Invites"])

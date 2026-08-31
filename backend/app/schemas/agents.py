@@ -30,6 +30,7 @@ class AgentBase(BaseModel):
     voice_id: Optional[str] = None
     voice_config: Optional[VoiceConfig] = None
     workflow_id: Optional[str] = None
+    agent_type: str = "specialist"  # "master" | "specialist"
     
     # Overrides
     overrides: Optional[AgentOverride] = Field(default_factory=AgentOverride)
@@ -54,6 +55,7 @@ class AgentUpdate(BaseModel):
     voice_id: Optional[str] = None
     voice_config: Optional[VoiceConfig] = None
     workflow_id: Optional[str] = None
+    agent_type: Optional[str] = None
 
 class AgentResponse(AgentBase):
     id: str

@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { HashRouter, Routes, Route, Outlet, useLocation, Navigate } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useAuthStore } from "./store/useAuthStore";
@@ -22,6 +22,20 @@ import AuthPage from "./pages/AuthPage";
 import OnboardingPage from "./pages/OnboardingPage";
 import WidgetPage from "./pages/WidgetPage";
 
+// New Gap Pages
+import LegalPage from "./pages/legal/LegalPage";
+import BillingPage from "./pages/BillingPage";
+import HelpCenter from "./pages/HelpCenter";
+import NotFoundPage from "./pages/states/NotFoundPage";
+import ForbiddenPage from "./pages/states/ForbiddenPage";
+import ServerErrorPage from "./pages/states/ServerErrorPage";
+import MaintenancePage from "./pages/states/MaintenancePage";
+
+// Global Utilities
+import { CookieConsentBanner } from "./components/CookieConsentBanner";
+import { OfflineBanner } from "./components/OfflineBanner";
+import { SessionExpiredModal } from "./components/SessionExpiredModal";
+
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
@@ -43,6 +57,8 @@ const titles: Record<string, string> = {
   "/memory": "AI Memory",
   "/team": "Team",
   "/settings": "Settings",
+  "/billing": "Billing & Plans",
+  "/help": "Support Center",
   "/testing": "AI Testing",
   "/voice-studio": "Voice Studio",
 };
@@ -83,6 +99,8 @@ function DashboardLayout() {
 
 function MainRoutes() {
   const { initialize } = useAuthStore();
+  const [cookieModalOpen, setCookieModalOpen] = useState(false);
+  const [sessionExpiredOpen, setSessionExpiredOpen] = useState(false);
 
   useEffect(() => {
     const isWidgetRoute =
@@ -95,13 +113,51 @@ function MainRoutes() {
 
   return (
     <HashRouter>
+      <OfflineBanner />
+      <CookieConsentBanner
+        isOpenExternal={cookieModalOpen}
+        onCloseExternal={() => setCookieModalOpen(false)}
+      />
+      <SessionExpiredModal
+        isOpen={sessionExpiredOpen}
+        onClose={() => setSessionExpiredOpen(false)}
+      />
+
       <Routes>
-        <Route path="/" element={<LandingPage />} />
+        {/* Landing Page */}
+        <Route path="/" element={<LandingPage onOpenCookiePreferences={() => setCookieModalOpen(true)} />} />
+
+        {/* Authentication & Account Recovery */}
         <Route path="/signin" element={<AuthPage mode="signin" />} />
         <Route path="/signup" element={<AuthPage mode="signup" />} />
+        <Route path="/forgot-password" element={<AuthPage mode="forgot-password" />} />
+        <Route path="/reset-password" element={<AuthPage mode="reset-password" />} />
+        <Route path="/verify-email" element={<AuthPage mode="verify-email" />} />
+
+        {/* Onboarding */}
         <Route path="/onboarding" element={<OnboardingPage />} />
 
-        {/* Public widget page (embedded in an iframe on external sites — no auth) */}
+        {/* Public Legal & Trust Hub Pages */}
+        <Route path="/privacy" element={<LegalPage sectionId="privacy" onOpenCookiePreferences={() => setCookieModalOpen(true)} />} />
+        <Route path="/terms" element={<LegalPage sectionId="terms" onOpenCookiePreferences={() => setCookieModalOpen(true)} />} />
+        <Route path="/cookies" element={<LegalPage sectionId="cookies" onOpenCookiePreferences={() => setCookieModalOpen(true)} />} />
+        <Route path="/security" element={<LegalPage sectionId="security" onOpenCookiePreferences={() => setCookieModalOpen(true)} />} />
+        <Route path="/acceptable-use" element={<LegalPage sectionId="aup" onOpenCookiePreferences={() => setCookieModalOpen(true)} />} />
+        <Route path="/dpa" element={<LegalPage sectionId="dpa" onOpenCookiePreferences={() => setCookieModalOpen(true)} />} />
+        <Route path="/disclaimer" element={<LegalPage sectionId="disclaimer" onOpenCookiePreferences={() => setCookieModalOpen(true)} />} />
+        <Route path="/accessibility" element={<LegalPage sectionId="accessibility" onOpenCookiePreferences={() => setCookieModalOpen(true)} />} />
+        <Route path="/disclosure" element={<LegalPage sectionId="disclosure" onOpenCookiePreferences={() => setCookieModalOpen(true)} />} />
+        <Route path="/community-guidelines" element={<LegalPage sectionId="community" onOpenCookiePreferences={() => setCookieModalOpen(true)} />} />
+
+        {/* Support & Help Center */}
+        <Route path="/help" element={<HelpCenter />} />
+
+        {/* System Error & Edge Case Screens */}
+        <Route path="/403" element={<ForbiddenPage />} />
+        <Route path="/500" element={<ServerErrorPage />} />
+        <Route path="/maintenance" element={<MaintenancePage />} />
+
+        {/* Public widget page */}
         <Route path="/widget/:widgetId" element={<WidgetPage />} />
 
         {/* Protected Customer Workspace Routes */}
@@ -127,11 +183,14 @@ function MainRoutes() {
           <Route path="memory" element={<MemoryPage />} />
           <Route path="team" element={<Team />} />
           <Route path="settings" element={<Settings />} />
+          <Route path="billing" element={<BillingPage />} />
+          <Route path="help" element={<HelpCenter />} />
           <Route path="testing" element={<Testing />} />
           <Route path="voice-studio" element={<VoiceStudio />} />
         </Route>
 
-        <Route path="*" element={<Navigate to="/app" replace />} />
+        {/* Wildcard 404 Fallback Route */}
+        <Route path="*" element={<NotFoundPage />} />
       </Routes>
     </HashRouter>
   );

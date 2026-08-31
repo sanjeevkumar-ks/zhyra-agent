@@ -158,22 +158,26 @@ export default function AgentWorkspace() {
             <Button variant="outline" onClick={() => setIsEditOpen(true)}>
               Edit Agent
             </Button>
-            <Button
-              variant="outline"
-              onClick={handleToggleStatus}
-              disabled={toggleStatusMutation.isPending}
-              icon={agent.status === "active" ? <Pause size={14} /> : <Play size={14} />}
-            >
-              {agent.status === "active" ? "Pause" : "Activate"}
-            </Button>
-            <Button
-              variant="outline"
-              onClick={() => setIsDeleteConfirmOpen(true)}
-              className="text-rose-500 hover:text-rose-600 hover:border-rose-500/30"
-              icon={<Trash2 size={14} />}
-            >
-              Delete
-            </Button>
+            {agent.agent_type !== "master" && (
+              <>
+                <Button
+                  variant="outline"
+                  onClick={handleToggleStatus}
+                  disabled={toggleStatusMutation.isPending}
+                  icon={agent.status === "active" ? <Pause size={14} /> : <Play size={14} />}
+                >
+                  {agent.status === "active" ? "Pause" : "Activate"}
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => setIsDeleteConfirmOpen(true)}
+                  className="text-rose-500 hover:text-rose-600 hover:border-rose-500/30"
+                  icon={<Trash2 size={14} />}
+                >
+                  Delete
+                </Button>
+              </>
+            )}
             <Button icon={<Sparkles size={14} />} onClick={() => navigate(appRoute("/testing"))}>
               Test Agent
             </Button>
@@ -1687,6 +1691,12 @@ function EditAgentDrawer({ agent, onClose }: { agent: any; onClose: () => void }
               <label className="text-[12px] text-ink-faint">Name</label>
               <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Tara" required className={inputBase} />
             </div>
+            {agent.agent_type === "master" && (
+              <div className="space-y-1.5">
+                <label className="text-[12px] text-ink-faint">Type</label>
+                <input value="Master Agent" disabled className="w-full rounded-xl border border-line bg-canvas-alt/20 px-3.5 py-2.5 text-[13px] text-ink-faint cursor-not-allowed" />
+              </div>
+            )}
             <div className="space-y-1.5">
               <label className="text-[12px] text-ink-faint">Purpose</label>
               <input

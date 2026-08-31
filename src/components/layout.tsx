@@ -33,6 +33,8 @@ import {
   Moon,
   Sun,
   Monitor,
+  CreditCard,
+  HelpCircle,
 } from "lucide-react";
 import { cn } from "../utils/cn";
 import { appRoute } from "../lib/routes";
@@ -60,6 +62,8 @@ const nav = [
   { to: appRoute("/memory"), label: "Memory", icon: BrainCircuit },
   { to: appRoute("/team"), label: "Team", icon: Users },
   { to: appRoute("/voice-studio"), label: "Voice Studio", icon: AudioLines },
+  { to: appRoute("/billing"), label: "Billing & Plan", icon: CreditCard },
+  { to: appRoute("/help"), label: "Support Center", icon: HelpCircle },
   { to: appRoute("/settings"), label: "Settings", icon: Settings },
 ];
 

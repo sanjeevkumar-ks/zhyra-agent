@@ -25,9 +25,16 @@ class GeminiProvider(LLMProvider):
             "gemini-2.0-flash",
             "gemini-2.5-flash",
             "gemini-2.5-pro",
+            "gemini-3.5-flash",
+            "gemini-3.5-pro",
+            "gemini-3.6-flash",
+            "gemini-3.6-pro",
+            "gemini-3.7-flash",
+            "gemini-3.7-pro",
             "gemini-flash-latest",
             "gemini-pro-latest",
         ]
+
 
     @property
     def supports_streaming(self) -> bool:
@@ -105,7 +112,7 @@ class GeminiProvider(LLMProvider):
 
     def _normalize_model(self, model: Optional[str]) -> str:
         if not model:
-            return "gemini-1.5-flash"
+            return "gemini-3.5-flash"
         if "/" in model:
             model = model.split("/")[-1]
 
@@ -115,9 +122,18 @@ class GeminiProvider(LLMProvider):
             "gemini-2.0-flash",
             "gemini-2.0-flash-lite",
             "gemini-2.0-pro-exp-02-05",
+            "gemini-2.5-flash",
+            "gemini-2.5-pro",
+            "gemini-3.5-flash",
+            "gemini-3.5-pro",
+            "gemini-3.6-flash",
+            "gemini-3.6-pro",
+            "gemini-3.7-flash",
+            "gemini-3.7-pro",
         }
         if model in valid_models:
             return model
+
 
         log_error(f"Invalid or unsupported model requested: '{model}'")
         raise LLMProviderError(f"INVALID_MODEL: The requested model '{model}' is invalid or not supported.", code="INVALID_MODEL")

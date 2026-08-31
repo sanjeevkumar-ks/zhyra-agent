@@ -99,11 +99,12 @@ function GradientBadge({ children, delay = "0ms" }: { children: ReactNode; delay
 const VIDEO_URL = "https://d8j0ntlcm91z4.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/hf_20260406_094145_4a271a6c-3869-4f1c-8aa7-aeb0cb227994.mp4";
 
 const navItems = [
-  { label: "Platform", href: "#platform" },
-  { label: "AI Employees", href: "#ai-employees" },
-  { label: "Voice Studio", href: "#voice" },
+  { label: "Platform", href: "#ai-employees" },
+  { label: "Interaction", href: "#platform" },
   { label: "Integrations", href: "#integrations" },
+  { label: "Voice Studio", href: "#voice" },
   { label: "Pricing", href: "#pricing" },
+  { label: "FAQ", href: "#faq" },
 ];
 
 const employeeCards = [
@@ -138,7 +139,7 @@ const faq = [
    Page Wrapper
 ───────────────────────────────────────── */
 
-export default function LandingPage() {
+export default function LandingPage({ onOpenCookiePreferences }: { onOpenCookiePreferences?: () => void }) {
   const navigate = useNavigate();
   const [billingMode, setBillingMode] = useState<"monthly" | "annual">("monthly");
   const [openFaq, setOpenFaq] = useState(faq[0][0]);
@@ -333,13 +334,20 @@ export default function LandingPage() {
             <ZhyraMark size={22} />
             <span className="text-[13.5px] font-semibold text-white">Zhyra AI</span>
           </div>
-          <div className="flex flex-wrap gap-x-6 gap-y-2">
-            {["Product", "Pricing", "Documentation", "Blog", "Privacy", "Terms", "Contact"].map((item) => (
-              <a key={item} className="text-[13px] text-gray-500 transition-colors hover:text-white cursor-pointer">{item}</a>
-            ))}
+          <div className="flex flex-wrap gap-x-6 gap-y-2 text-[13px] text-gray-500">
+            <button onClick={() => goTo("#ai-employees")} className="hover:text-white transition-colors">Product</button>
+            <button onClick={() => goTo("#pricing")} className="hover:text-white transition-colors">Pricing</button>
+            <button onClick={() => navigate("/help")} className="hover:text-white transition-colors">Help Center</button>
+            <button onClick={() => navigate("/privacy")} className="hover:text-white transition-colors">Privacy</button>
+            <button onClick={() => navigate("/terms")} className="hover:text-white transition-colors">Terms</button>
+            <button onClick={() => navigate("/cookies")} className="hover:text-white transition-colors">Cookies</button>
+            {onOpenCookiePreferences && (
+              <button onClick={onOpenCookiePreferences} className="hover:text-white transition-colors">Cookie Preferences</button>
+            )}
+            <button onClick={() => navigate("/security")} className="hover:text-white transition-colors">Security</button>
+            <button onClick={() => navigate("/help")} className="hover:text-white transition-colors">Contact Support</button>
           </div>
           <div className="flex items-center gap-4 text-gray-600">
-            <CircleHelp size={15} className="transition-colors hover:text-gray-300" />
             <Globe size={15} className="transition-colors hover:text-gray-300" />
             <MessagesSquare size={15} className="transition-colors hover:text-gray-300" />
           </div>
@@ -365,13 +373,28 @@ function SiteNav({ goTo, scrolled }: { goTo: (path: string) => void; scrolled: b
           scrolled ? "liquid-glass" : "bg-transparent"
         )}
       >
-        <div className="flex items-center gap-2 text-[14px] font-semibold tracking-tight text-white sm:text-[15px] animate-blur-fade-up" style={{ animationDelay: "0ms" }}>
+        <div
+          onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
+          className="flex items-center gap-2 text-[14px] font-semibold tracking-tight text-white sm:text-[15px] animate-blur-fade-up cursor-pointer hover:opacity-90 transition-opacity"
+          style={{ animationDelay: "0ms" }}
+        >
           <ZhyraMark size={22} /> ZHYRA
         </div>
 
         <div className="hidden items-center gap-7 lg:flex">
           {navItems.map((item, i) => (
-            <a key={item.label} href={item.href} className="text-[13px] text-gray-300 transition-colors hover:text-white animate-blur-fade-up" style={{ animationDelay: `${100 + i * 50}ms` }}>{item.label}</a>
+            <a
+              key={item.label}
+              href={item.href}
+              onClick={(e) => {
+                e.preventDefault();
+                goTo(item.href);
+              }}
+              className="text-[13px] text-gray-300 transition-colors hover:text-white cursor-pointer animate-blur-fade-up"
+              style={{ animationDelay: `${100 + i * 50}ms` }}
+            >
+              {item.label}
+            </a>
           ))}
         </div>
 
@@ -403,7 +426,17 @@ function SiteNav({ goTo, scrolled }: { goTo: (path: string) => void; scrolled: b
       <div className={`mx-auto mt-2 max-w-[1240px] rounded-2xl border border-white/10 bg-black/95 shadow-2xl backdrop-blur-lg transition-all duration-500 ease-out lg:hidden ${menuOpen ? "translate-y-0 opacity-100" : "pointer-events-none -translate-y-4 opacity-0"}`}>
         <div className="flex flex-col p-3">
           {navItems.map((item, i) => (
-            <a key={item.label} href={item.href} onClick={() => setMenuOpen(false)} className="rounded-xl px-3 py-3 text-sm text-gray-300 transition-all duration-500 ease-out hover:bg-white/5 hover:text-white" style={{ transitionDelay: menuOpen ? `${i * 50}ms` : "0ms", transform: menuOpen ? "translateX(0)" : "translateX(-16px)", opacity: menuOpen ? 1 : 0 }}>
+            <a
+              key={item.label}
+              href={item.href}
+              onClick={(e) => {
+                e.preventDefault();
+                setMenuOpen(false);
+                goTo(item.href);
+              }}
+              className="rounded-xl px-3 py-3 text-sm text-gray-300 transition-all duration-500 ease-out hover:bg-white/5 hover:text-white"
+              style={{ transitionDelay: menuOpen ? `${i * 50}ms` : "0ms", transform: menuOpen ? "translateX(0)" : "translateX(-16px)", opacity: menuOpen ? 1 : 0 }}
+            >
               {item.label}
             </a>
           ))}

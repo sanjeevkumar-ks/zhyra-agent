@@ -192,6 +192,141 @@ TOOL_DEFINITIONS: Dict[str, Dict[str, Any]] = {
             },
         },
     },
+
+    # Zhyra Master Agent tools
+    "zhyra.list_agents": {
+        "integration_id": "platform",
+        "action": "list_agents",
+        "schema": {
+            "name": "zhyra_list_agents",
+            "description": "Lists all AI agents running in the active workspace along with their status, purpose, and capability keywords.",
+            "parameters": {"type": "OBJECT", "properties": {}, "required": []},
+        },
+    },
+    "zhyra.get_agent": {
+        "integration_id": "platform",
+        "action": "get_agent",
+        "schema": {
+            "name": "zhyra_get_agent",
+            "description": "Retrieves configuration directives, personality overrides, and operational metrics for a specific agent by ID or name.",
+            "parameters": {
+                "type": "OBJECT",
+                "properties": {
+                    "agent_id": {"type": "STRING", "description": "Agent ID"},
+                    "name": {"type": "STRING", "description": "Agent Name (e.g. Tara)"}
+                },
+                "required": [],
+            },
+        },
+    },
+    "zhyra.pause_agent": {
+        "integration_id": "platform",
+        "action": "pause_agent",
+        "schema": {
+            "name": "zhyra_pause_agent",
+            "description": "Pauses a specific specialist agent, preventing them from handling customer messages.",
+            "parameters": {
+                "type": "OBJECT",
+                "properties": {
+                    "agent_id": {"type": "STRING", "description": "Agent ID"},
+                    "name": {"type": "STRING", "description": "Agent Name (e.g. Tara)"},
+                    "reason": {"type": "STRING", "description": "Reason for pausing"}
+                },
+                "required": [],
+            },
+        },
+    },
+    "zhyra.resume_agent": {
+        "integration_id": "platform",
+        "action": "resume_agent",
+        "schema": {
+            "name": "zhyra_resume_agent",
+            "description": "Resumes a paused specialist agent so they can process messages again.",
+            "parameters": {
+                "type": "OBJECT",
+                "properties": {
+                    "agent_id": {"type": "STRING", "description": "Agent ID"},
+                    "name": {"type": "STRING", "description": "Agent Name (e.g. Tara)"},
+                    "reason": {"type": "STRING", "description": "Reason for resuming"}
+                },
+                "required": [],
+            },
+        },
+    },
+    "zhyra.get_agent_conversations": {
+        "integration_id": "platform",
+        "action": "get_agent_conversations",
+        "schema": {
+            "name": "zhyra_get_agent_conversations",
+            "description": "Retrieves a listing of recent conversations for a specific agent.",
+            "parameters": {
+                "type": "OBJECT",
+                "properties": {
+                    "agent_id": {"type": "STRING", "description": "Agent ID"},
+                    "limit": {"type": "INTEGER", "description": "Number of conversations to retrieve (default: 10)"}
+                },
+                "required": ["agent_id"],
+            },
+        },
+    },
+    "zhyra.list_workflows": {
+        "integration_id": "platform",
+        "action": "list_workflows",
+        "schema": {
+            "name": "zhyra_list_workflows",
+            "description": "Lists all active automation workflows and graph-based nodes configured in this workspace.",
+            "parameters": {"type": "OBJECT", "properties": {}, "required": []},
+        },
+    },
+    "zhyra.get_workspace_analytics": {
+        "integration_id": "platform",
+        "action": "get_workspace_analytics",
+        "schema": {
+            "name": "zhyra_get_workspace_analytics",
+            "description": "Calculates real workspace operational metrics (deflection rates, CSAT, task counts) strictly from logged conversation events.",
+            "parameters": {
+                "type": "OBJECT",
+                "properties": {
+                    "range": {"type": "STRING", "description": "Time range: 'today', '7d', '30d', '90d' (default: '30d')"}
+                },
+                "required": [],
+            },
+        },
+    },
+    "zhyra.list_integrations": {
+        "integration_id": "platform",
+        "action": "list_integrations",
+        "schema": {
+            "name": "zhyra_list_integrations",
+            "description": "Lists connected and disconnected platform integrations (Slack, Gmail, Google Calendar, HubSpot etc.) and their status.",
+            "parameters": {"type": "OBJECT", "properties": {}, "required": []},
+        },
+    },
+    "zhyra.get_agent_issues": {
+        "integration_id": "platform",
+        "action": "get_agent_issues",
+        "schema": {
+            "name": "zhyra_get_agent_issues",
+            "description": "Scans workspace settings, agent states, and integration health to diagnose active issues and errors that need attention.",
+            "parameters": {"type": "OBJECT", "properties": {}, "required": []},
+        },
+    },
+    "zhyra.delegate_to_agent": {
+        "integration_id": "platform",
+        "action": "delegate_to_agent",
+        "schema": {
+            "name": "zhyra_delegate_to_agent",
+            "description": "Delegates a specific sub-task or inquiry to a real enabled specialist agent in the workspace (e.g. Tara, Kayal, Mitran, Agan, Mathi) and returns their execution response.",
+            "parameters": {
+                "type": "OBJECT",
+                "properties": {
+                    "agent_id": {"type": "STRING", "description": "ID or name of the target agent"},
+                    "task": {"type": "STRING", "description": "The exact task or query to delegate to the target agent"}
+                },
+                "required": ["agent_id", "task"],
+            },
+        },
+    },
 }
 
 # ---------------------------------------------------------------------------

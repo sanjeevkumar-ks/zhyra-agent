@@ -38,13 +38,18 @@ class AgentRuntime:
             trace_id = f"trace_{uuid.uuid4().hex[:12]}"
         log_info(f"[Runtime][{trace_id}] executing agent={agent_id} workspace={workspace_id} mode={mode} query='{query[:80]}'")
 
-        # 1. Fetch Agent data
+        # 1. Fetch Agent data — the widget_id→agent_id chain has already been
+        #    verified by WidgetService. We load the exact agent by its ID.
+        #    Silently substituting any other agent in the workspace is a hard
+        #    violation of the "widget_id is the sole source of truth" contract.
         agent_ref = firestore_client.collection("agents").document(agent_id)
         agent_snap = agent_ref.get()
         agent_data = None
         if agent_snap.exists:
             agent_data = agent_snap.to_dict()
         else:
+            # Secondary: Firestore doc-ID sometimes differs from the stored "id" field.
+            # Scan only to reconcile the same logical agent, not to pick a different one.
             try:
                 docs = firestore_client.collection("agents").stream()
                 for d in docs:
@@ -56,28 +61,43 @@ class AgentRuntime:
                 pass
 
         if not agent_data:
-            try:
-                docs = firestore_client.collection("agents").stream()
-                for d in docs:
-                    ddata = d.to_dict() or {}
-                    if ddata.get("workspace_id") == workspace_id:
-                        agent_data = ddata
-                        break
-            except Exception:
-                pass
-
-        if not agent_data:
+            log_error(
+                f"[Runtime][{trace_id}] AGENT_NOT_FOUND: agent_id={agent_id} "
+                f"workspace_id={workspace_id}. Refusing to substitute a different agent."
+            )
+            msg = "The AI assistant could not be located. Please contact support."
             return {
-                "text": "I apologize, but I could not locate my agent settings.",
+                "text": msg,
+                "message": msg,
                 "intent": "Error",
-                "message": "Settings missing",
-                "blocks": [],
+                "blocks": [{"type": "text", "data": {"text": msg}}],
                 "terminal_state": "FAILED",
                 "execution_status": "failed",
                 "error_code": "AGENT_NOT_FOUND",
+                "trace_id": trace_id,
+                "timings": {"total_ms": int((time.time() - t0) * 1000)},
             }
+        log_info(f"[WEBCHAT][{trace_id}] agent_loaded agent_id={agent_id} name={agent_data.get('name', 'unknown')} workspace_id={workspace_id}")
 
-        # 2. Resolve Workflow
+        # 1b. Master Agent Enablement Rule Validation
+        if agent_data.get("agent_type") == "master":
+            from app.api.master_agent import _calculate_master_agent_status
+            master_status = await _calculate_master_agent_status(workspace_id, agent_data)
+            if master_status.get("status") != "ENABLED":
+                reason = master_status.get("error_reason") or "Master Agent is not enabled."
+                log_error(f"[Runtime][{trace_id}] MASTER_AGENT_NOT_READY: {reason}")
+                msg = f"The Zhyra Master Agent is not ready to execute. Reason: {reason} Please configure Zhyra in Agent Settings."
+                return {
+                    "text": msg,
+                    "message": msg,
+                    "intent": "Master Agent Not Ready",
+                    "blocks": [{"type": "text", "data": {"text": msg}}],
+                    "terminal_state": "FAILED",
+                    "execution_status": "failed",
+                    "error_code": "MASTER_AGENT_NOT_READY",
+                    "trace_id": trace_id,
+                    "timings": {"total_ms": int((time.time() - t0) * 1000)},
+                }
         workflow_id = agent_data.get("workflow_id")
         workflow_nodes = []
         workflow_edges = []
@@ -313,8 +333,8 @@ class AgentRuntime:
             
             return res_dict
         except Exception as e:
-            log_error(f"LangGraph runtime execution failed for agent {agent_id}", exc=e)
-            err_msg = f"Service Connection Failure: {str(e)}" if str(e) else "Service Connection Failure: AI provider unavailable."
+            log_error(f"[Runtime][{trace_id}] LangGraph runtime execution failed for agent {agent_id}", exc=e)
+            err_msg = "The AI provider encountered an error. Please try again."
             return {
                 "text": err_msg,
                 "message": err_msg,
@@ -330,7 +350,7 @@ class AgentRuntime:
                 "action_state": [],
                 "terminal_state": "FAILED",
                 "execution_status": "failed",
-                "error_code": "PROVIDER_ERROR",
+                "error_code": "LLM_PROVIDER_ERROR",
                 "timings": {"total_ms": int((time.time() - t0) * 1000)},
             }
 

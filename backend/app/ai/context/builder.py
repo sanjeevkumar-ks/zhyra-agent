@@ -91,6 +91,12 @@ class ContextBuilder:
         # 1. Base system prompt
         system_prompt = resolve_agent_system_prompt(agent_data, overrides)
         
+        # Inject live workspace status if this is the Master Agent
+        if agent_data.get("agent_type") == "master":
+            from app.ai.context.zhyra_context import ZhyraContextResolver
+            workspace_summary = await ZhyraContextResolver.build_workspace_summary(workspace_id)
+            system_prompt = f"{system_prompt}\n\n{workspace_summary}"
+        
         # 2. Build conversation rolling history (intent-aware)
         convo_id = history[0].get("conversation_id", f"temp_{agent_id}") if history else f"temp_{agent_id}"
         max_history = cls._get_max_history_for_intent(config, intent_type)
@@ -100,9 +106,11 @@ class ContextBuilder:
 
         # 3. Build relevance-filtered memory context (intent-aware)
         memory_budget = cls._get_memory_budget_for_intent(budget, config, intent_type)
+        agent_name = agent_data.get("name", "Agent")
         memory_str, mem_tokens = await MemoryContextBuilder.build(
             workspace_id, agent_name, query, config, memory_budget
         )
+
 
         # 4. Build reranked & compressed RAG context (intent-aware)
         rag_budget = cls._get_rag_budget_for_intent(budget, config, intent_type)

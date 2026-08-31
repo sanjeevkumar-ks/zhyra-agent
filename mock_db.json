@@ -9681,6 +9681,32 @@
       "conversation_id": null,
       "metadata": {},
       "timestamp": 1787595793.164051
+    },
+    "evt_6c4b8a96432d": {
+      "id": "evt_6c4b8a96432d",
+      "workspace_id": "ws_test_zhyra",
+      "event_type": "zhyra.agent_paused",
+      "agent_id": "agt_f5805a05",
+      "conversation_id": "",
+      "tool_name": "",
+      "success": true,
+      "metadata": {
+        "reason": "Direct request from User"
+      },
+      "created_at": 1787943365.550373
+    },
+    "evt_0aa2d08ffa35": {
+      "id": "evt_0aa2d08ffa35",
+      "workspace_id": "ws_test_zhyra",
+      "event_type": "zhyra.agent_resumed",
+      "agent_id": "agt_f5805a05",
+      "conversation_id": "",
+      "tool_name": "",
+      "success": true,
+      "metadata": {
+        "reason": "Direct request from User"
+      },
+      "created_at": 1787943365.585545
     }
   },
   "notifications": {

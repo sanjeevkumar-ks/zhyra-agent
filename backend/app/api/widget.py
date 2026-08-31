@@ -58,11 +58,23 @@ async def init_widget_session(payload: dict, request: Request, response: Respons
         client_ip=client_ip,
     )
 
+    deployment = await WidgetService.resolve_deployment(widget_id)
+    config = deployment.get("config") or {}
+    agent_meta = WidgetService.agent_meta(session["agent_id"])
+
+    # Merge customized channel overrides
+    if config.get("primary_color"):
+        agent_meta["primary_color"] = config["primary_color"]
+    if config.get("widget_title"):
+        agent_meta["name"] = config["widget_title"]
+    if config.get("welcome_message"):
+        agent_meta["welcome_message"] = config["welcome_message"]
+
     return {
         "session_token": session["session_id"],
         "conversation_id": session["conversation_id"],
         "widget_id": widget_id,
-        "agent": WidgetService.agent_meta(session["agent_id"]),
+        "agent": agent_meta,
         "widget_version": 2,
     }
 
@@ -84,16 +96,29 @@ async def create_widget_session(payload: dict, request: Request, response: Respo
             page_title=payload.get("page_title", ""),
             client_ip=client_ip,
         )
+
+        deployment = await WidgetService.resolve_deployment(widget_id)
+        config = deployment.get("config") or {}
+        agent_meta = WidgetService.agent_meta(session["agent_id"])
+
+        # Merge customized channel overrides
+        if config.get("primary_color"):
+            agent_meta["primary_color"] = config["primary_color"]
+        else:
+            agent_meta["primary_color"] = "#2F6BFF"
+        if config.get("widget_title"):
+            agent_meta["name"] = config["widget_title"]
+        if config.get("welcome_message"):
+            agent_meta["welcome_message"] = config["welcome_message"]
+
         return {
             "session_id": session["session_id"],
             "session_token": session["session_id"],
             "conversation_id": session["conversation_id"],
             "widget_id": widget_id,
-            "agent": {
-                **WidgetService.agent_meta(session["agent_id"]),
-                "primary_color": "#2F6BFF",
-            },
+            "agent": agent_meta,
         }
+
 
     # --- Legacy flow: agent_id + workspace_id from embed attributes ---
     agent_id = payload.get("agent_id") or payload.get("agentId")
@@ -263,6 +288,16 @@ async def send_widget_message(payload: dict, request: Request, response: Respons
     agent_id = session["agent_id"]
     convo_id = session["conversation_id"]
 
+    import uuid as _uuid
+    request_id = f"wchat_{_uuid.uuid4().hex[:10]}"
+    log_info(
+        f"[WEBCHAT] request_started request_id={request_id} "
+        f"widget_id={session.get('widget_id', 'unknown')} "
+        f"agent_id={agent_id} workspace_id={workspace_id} "
+        f"session_token={session_token[:12]}... "
+        f"query_len={len(user_text)}"
+    )
+
     # 1. Load current conversation history
     history = []
     convo_ref = firestore_client.collection("conversations").document(convo_id)
@@ -279,7 +314,12 @@ async def send_widget_message(payload: dict, request: Request, response: Respons
     try:
         snap = convo_ref.get()
         curr_msgs = snap.to_dict().get("messages", []) if (snap and snap.exists) else []
-        convo_ref.update({"messages": curr_msgs + [user_msg_doc], "preview": user_text[:60], "updated_at": time.time()})
+        convo_ref.update({
+            "messages": curr_msgs + [user_msg_doc],
+            "preview": user_text[:60],
+            "time": time.strftime("%I:%M %p"),
+            "updated_at": time.time()
+        })
         AnalyticsService.record_event(
             workspace_id=workspace_id, event_type="user_message", agent_id=agent_id,
             conversation_id=convo_id, metadata={"text": user_text},
@@ -289,6 +329,8 @@ async def send_widget_message(payload: dict, request: Request, response: Respons
 
     # 3. Execute the real AgentRuntime
     try:
+        import time as _time
+        _t0 = _time.time()
         agent_reply = await AgentRuntime.execute(
             workspace_id=workspace_id,
             agent_id=agent_id,
@@ -296,10 +338,22 @@ async def send_widget_message(payload: dict, request: Request, response: Respons
             history=history,
             conversation_id=convo_id,
             user_id="widget_user",
+            trace_id=request_id,
         )
+        _elapsed_ms = int((_time.time() - _t0) * 1000)
         reply_text = agent_reply.get("text") or agent_reply.get("message") or "I completed your request."
         blocks = agent_reply.get("blocks", [])
         actions = agent_reply.get("actions", [])
+        t_state = agent_reply.get("terminal_state", "COMPLETED")
+        e_status = agent_reply.get("execution_status", "completed")
+        error_code = agent_reply.get("error_code", "")
+
+        log_info(
+            f"[WEBCHAT] request_completed request_id={request_id} "
+            f"agent_id={agent_id} terminal_state={t_state} "
+            f"execution_status={e_status} error_code={error_code} "
+            f"latency_ms={_elapsed_ms} reply_len={len(reply_text)}"
+        )
 
         agent_msg_doc = {
             "id": f"msg_wgt_{uuid.uuid4().hex[:8]}",
@@ -312,7 +366,12 @@ async def send_widget_message(payload: dict, request: Request, response: Respons
         try:
             snap2 = convo_ref.get()
             curr_msgs2 = snap2.to_dict().get("messages", []) if (snap2 and snap2.exists) else []
-            convo_ref.update({"messages": curr_msgs2 + [agent_msg_doc], "preview": reply_text[:60], "updated_at": time.time()})
+            convo_ref.update({
+                "messages": curr_msgs2 + [agent_msg_doc],
+                "preview": reply_text[:60],
+                "time": time.strftime("%I:%M %p"),
+                "updated_at": time.time()
+            })
         except Exception as ex:
             log_error("Failed to append agent reply to Firestore", exc=ex)
 
@@ -321,10 +380,10 @@ async def send_widget_message(payload: dict, request: Request, response: Respons
             conversation_id=convo_id, metadata={"text": reply_text},
         )
 
-        if agent_reply.get("terminal_state") == "FAILED" or agent_reply.get("status") == "error":
+        if t_state == "FAILED" or e_status == "error":
             raise HTTPException(
                 status_code=503,
-                detail={"error": {"code": agent_reply.get("error_code", "PROVIDER_ERROR"), "message": reply_text}}
+                detail={"error": {"code": error_code or "PROVIDER_ERROR", "message": reply_text}}
             )
 
         return {
@@ -333,12 +392,15 @@ async def send_widget_message(payload: dict, request: Request, response: Respons
             "blocks": blocks,
             "actions": actions,
             "status": agent_reply.get("status", "active"),
-            "terminal_state": agent_reply.get("terminal_state", "COMPLETED"),
+            "terminal_state": t_state,
         }
+    except HTTPException:
+        raise
     except Exception as e:
-        log_error(f"Widget AgentRuntime execution error: {e}", exc=e)
+        log_error(f"[WEBCHAT] request_failed request_id={request_id} agent_id={agent_id} error={e}", exc=e)
         err_msg = "I encountered an issue processing your request. Please try again."
         return {"success": False, "message": err_msg, "blocks": [], "actions": [], "status": "error", "terminal_state": "FAILED"}
+
 
 
 @router.post("/feedback")
