@@ -61,15 +61,22 @@ class MockFirestoreClient:
         self._load()
 
     def _load(self):
-        if os.path.exists(self.file_path):
-            try:
-                with open(self.file_path, "r") as f:
-                    self._db = json.load(f)
-            except Exception as e:
-                log_error("Failed to load mock firestore database file, starting fresh", exc=e)
-                self._db = {}
-        else:
-            self._db = {}
+        possible_paths = [
+            self.file_path,
+            os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "mock_db.json")),
+            os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "mock_db.json")),
+            os.path.join("/tmp", "mock_db.json"),
+        ]
+        for path in possible_paths:
+            if path and os.path.exists(path):
+                try:
+                    with open(path, "r") as f:
+                        self._db = json.load(f)
+                        self.file_path = path
+                        return
+                except Exception as e:
+                    log_error(f"Failed to load mock firestore database from {path}", exc=e)
+        self._db = {}
 
     def _save(self):
         try:
