@@ -519,7 +519,6 @@ export default function Conversations() {
                     );
                   })
                 )}
-                <div ref={chatEndRef} />
               </div>
 
               {/* Message Input (fixed) */}

@@ -722,7 +722,6 @@ export default function Playground() {
                 <span className="break-words">Error: {streamError}</span>
               </div>
             )}
-            <div ref={chatEndRef} />
           </div>
 
           {/* Prompt Input Form (fixed) */}
